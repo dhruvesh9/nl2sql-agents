@@ -1,0 +1,25 @@
+- addresses: street addresses with a city, a postcode, and a country.
+- customers: the people or companies that buy our services.
+- accounts: billing accounts.
+- products: the mobile, broadband, and device products that we sell.
+- subscriptions: services that people use.
+- orders: purchase orders.
+- order_items: the single items in an order.
+- invoices: monthly bills.
+- invoice_lines: the single charges on a bill.
+- payments: money that we received.
+- usage_records: calls, texts, and data that people used.
+- payment_methods: saved cards and bank accounts that people use to pay.
+- refunds: money that we paid back.
+- credit_notes: credits that we gave for billing mistakes.
+- payment_plans: agreements to pay a debt in parts.
+- payment_plan_installments: the single parts of a payment plan.
+- direct_debit_mandates: permissions to take money from a bank account.
+- collections_cases: cases for overdue money that we must collect.
+- discounts: discount codes with a percentage and dates.
+- subscription_discounts: discounts that we gave to a service.
+- support_agents: staff who handle support requests.
+- support_tickets: support requests.
+- sim_cards: SIM cards.
+- devices: phones and routers.
+- tax_rates: tax rates for each country.
