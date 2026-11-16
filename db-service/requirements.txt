@@ -1,0 +1,6 @@
+fastapi==0.162.7            # web framework for the REST API
+uvicorn[standard]==0.54.0   # server that runs the FastAPI app
+pydantic-settings==2.16.3   # reads settings from the .env file
+sqlalchemy==2.1.8           # database engine and schema inspector (sync, 2.x)
+psycopg[binary]==3.3.9      # PostgreSQL driver (v3), the binary build needs no compiler
+sqlglot==30.31.0            # parses SQL for the SELECT-only guard
