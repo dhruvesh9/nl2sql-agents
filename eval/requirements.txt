@@ -1,0 +1,2 @@
+# Pinned. The eval project only calls agent-service over HTTP.
+httpx==0.28.1
