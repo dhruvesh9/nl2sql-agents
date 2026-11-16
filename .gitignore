@@ -1,0 +1,26 @@
+# Python
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+.ruff_cache/
+
+# Secrets. Never commit real keys. Only .env.example files are committed.
+.env
+.env.*
+!.env.example
+
+# Local working files that are not part of the published project
+CLAUDE.md
+KICKOFF.md
+docs/
+.claude/
+*.backup.md
+
+# Results of eval runs
+eval/results/
+
+# Editor and OS
+.vscode/
+.idea/
+.DS_Store
