@@ -1,0 +1,7 @@
+fastapi==0.162.7            # web framework for the REST API
+uvicorn[standard]==0.54.0   # server that runs the FastAPI app
+pydantic-settings==2.16.3   # reads settings from the .env file
+httpx==0.28.1               # sync HTTP client to call db-service
+together==3.1.1             # Together AI SDK to call the LLM
+pyyaml==6.0.3               # reads the evaluation questions file
+langfuse==5.2.0             # sends traces of LLM calls to Langfuse (optional, off by default)
