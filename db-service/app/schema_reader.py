@@ -166,11 +166,6 @@ def get_catalog() -> CatalogResponse:
             CatalogTable(
                 name=key[1],
                 description=comments.get(key, {}).get("text"),
-                column_descriptions={
-                    column["name"]: column["comment"]
-                    for column in columns[key]
-                    if column.get("comment")
-                },
                 foreign_keys=[
                     ForeignKeyInfo(
                         columns=item["constrained_columns"],

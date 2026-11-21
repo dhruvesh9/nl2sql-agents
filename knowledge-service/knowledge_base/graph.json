@@ -3,233 +3,112 @@
   "multigraph": true,
   "graph": {
     "dialect": "postgresql",
-    "generated_at": "2026-11-20T15:09:21+00:00"
+    "generated_at": "2026-11-21T06:39:24+00:00"
   },
   "nodes": [
     {
-      "type": "table",
       "description": "Billing accounts. One customer can have many accounts.",
-      "column_descriptions": {
-        "account_number": "Public account number shown on invoices.",
-        "status": "Account status: ACTIVE, SUSPENDED, or CLOSED.",
-        "currency": "ISO 4217 currency code."
-      },
       "id": "accounts"
     },
     {
-      "type": "table",
       "description": "Postal addresses. A customer points to two of them: billing and installation.",
-      "column_descriptions": {
-        "line1": "First line of the street address.",
-        "postcode": "Postal code.",
-        "country": "ISO 3166 two-letter country code."
-      },
       "id": "addresses"
     },
     {
-      "type": "table",
       "description": "Cases for unpaid money that the collections team follows up.",
-      "column_descriptions": {
-        "invoice_id": "Invoice that caused the case. Can be NULL.",
-        "status": "Case status: OPEN, CLOSED, or WRITTEN_OFF."
-      },
       "id": "collections_cases"
     },
     {
-      "type": "table",
       "description": "Credit given against an invoice, for example after a billing error.",
-      "column_descriptions": {},
       "id": "credit_notes"
     },
     {
-      "type": "table",
       "description": "People or companies that buy services.",
-      "column_descriptions": {
-        "status": "Status code: A active, S suspended, C closed.",
-        "created_date": "Date when the customer was created.",
-        "closed_date": "Date when the customer left. NULL while the customer is open.",
-        "billing_address_id": "Address where invoices go.",
-        "installation_address_id": "Address where the service is installed."
-      },
       "id": "customers"
     },
     {
-      "type": "table",
       "description": "Phones and routers (by IMEI) used with a subscription.",
-      "column_descriptions": {
-        "status": "Device status: ACTIVE, LOST, or RETURNED."
-      },
       "id": "devices"
     },
     {
-      "type": "table",
       "description": "Permission from an account to take money from its bank account.",
-      "column_descriptions": {
-        "status": "Mandate status: ACTIVE or CANCELLED."
-      },
       "id": "direct_debit_mandates"
     },
     {
-      "type": "table",
       "description": "Discount codes with a percentage and a validity period.",
-      "column_descriptions": {
-        "percent_off": "Discount in percent, for example 10.00.",
-        "valid_to": "Last valid day. NULL means no end date."
-      },
       "id": "discounts"
     },
     {
-      "type": "table",
       "description": "Charges on an invoice. A line can point to a subscription.",
-      "column_descriptions": {
-        "subscription_id": "Subscription that caused this charge. Can be NULL.",
-        "amount": "Charge amount for this line."
-      },
       "id": "invoice_lines"
     },
     {
-      "type": "table",
       "description": "Monthly bills sent to an account.",
-      "column_descriptions": {
-        "invoice_number": "Public invoice number.",
-        "total_amount": "Total amount on the invoice.",
-        "status": "Status code: O open, P paid, C cancelled."
-      },
       "id": "invoices"
     },
     {
-      "type": "table",
       "description": "Products inside an order.",
-      "column_descriptions": {
-        "unit_price": "Price of one unit when the order was placed."
-      },
       "id": "order_items"
     },
     {
-      "type": "table",
       "description": "Orders placed by an account.",
-      "column_descriptions": {
-        "status": "Order status: NEW, SHIPPED, or DONE.",
-        "total_amount": "Total value of the order."
-      },
       "id": "orders"
     },
     {
-      "type": "table",
       "description": "Cards and bank accounts that an account saved for paying.",
-      "column_descriptions": {
-        "method_type": "Type: CARD or BANK.",
-        "last4": "Last four digits of the card or bank account."
-      },
       "id": "payment_methods"
     },
     {
-      "type": "table",
       "description": "The parts of a payment plan. Each part has a due date.",
-      "column_descriptions": {
-        "status": "Part status: PAID, DUE, or LATE."
-      },
       "id": "payment_plan_installments"
     },
     {
-      "type": "table",
       "description": "Agreements to pay an overdue amount in parts.",
-      "column_descriptions": {
-        "status": "Plan status: ACTIVE, DONE, or DEFAULTED."
-      },
       "id": "payment_plans"
     },
     {
-      "type": "table",
       "description": "Money received against an invoice.",
-      "column_descriptions": {
-        "method": "Payment method: CARD, BANK, or CASH."
-      },
       "id": "payments"
     },
     {
-      "type": "table",
       "description": "Catalogue of services and devices that we sell.",
-      "column_descriptions": {
-        "product_type": "Type: MOBILE, BROADBAND, or DEVICE.",
-        "monthly_price": "Recurring price per month."
-      },
       "id": "products"
     },
     {
-      "type": "table",
       "description": "Money paid back to a customer for a payment.",
-      "column_descriptions": {
-        "status": "Refund status: PENDING, DONE, or REJECTED."
-      },
       "id": "refunds"
     },
     {
-      "type": "table",
       "description": "SIM cards. Each one belongs to a subscription.",
-      "column_descriptions": {
-        "status": "SIM status: ACTIVE or BLOCKED."
-      },
       "id": "sim_cards"
     },
     {
-      "type": "table",
       "description": "Discounts that were applied to a subscription.",
-      "column_descriptions": {},
       "id": "subscription_discounts"
     },
     {
-      "type": "table",
       "description": "A product that an account uses. Each subscription has one phone number (msisdn).",
-      "column_descriptions": {
-        "msisdn": "Phone number in international format. Used to link usage_records.",
-        "end_date": "End date. NULL while the subscription runs.",
-        "status": "Subscription status: ACTIVE, SUSPENDED, or ENDED."
-      },
       "id": "subscriptions"
     },
     {
-      "type": "table",
       "description": "Staff members who work on support tickets.",
-      "column_descriptions": {
-        "team": "Team: BILLING, TECHNICAL, or SALES."
-      },
       "id": "support_agents"
     },
     {
-      "type": "table",
       "description": "Support requests from customers.",
-      "column_descriptions": {
-        "agent_id": "Agent who works on the ticket. NULL while unassigned.",
-        "status": "Ticket status: OPEN, PENDING, or RESOLVED.",
-        "priority": "Priority: LOW, MEDIUM, or HIGH."
-      },
       "id": "support_tickets"
     },
     {
-      "type": "table",
       "description": "Tax rates by country and start date.",
-      "column_descriptions": {
-        "country": "ISO 3166 two-letter country code."
-      },
       "id": "tax_rates"
     },
     {
-      "type": "table",
       "description": "Calls, SMS, and data usage per phone number. Links to subscriptions by msisdn (no foreign key).",
-      "column_descriptions": {
-        "msisdn": "Phone number. Matches subscriptions.msisdn. No foreign key exists.",
-        "usage_type": "Type: VOICE, SMS, or DATA.",
-        "quantity": "Amount used, in the given unit.",
-        "unit": "Unit: MIN, COUNT, or MB.",
-        "cost": "Cost of this usage record."
-      },
       "id": "usage_records"
     }
   ],
   "edges": [
     {
-      "type": "foreign_key",
       "columns": [
         "customer_id"
       ],
@@ -241,7 +120,6 @@
       "key": "customer_id"
     },
     {
-      "type": "foreign_key",
       "columns": [
         "account_id"
       ],
@@ -253,7 +131,6 @@
       "key": "account_id"
     },
     {
-      "type": "foreign_key",
       "columns": [
         "invoice_id"
       ],
@@ -265,7 +142,6 @@
       "key": "invoice_id"
     },
     {
-      "type": "foreign_key",
       "columns": [
         "invoice_id"
       ],
@@ -277,7 +153,6 @@
       "key": "invoice_id"
     },
     {
-      "type": "foreign_key",
       "columns": [
         "billing_address_id"
       ],
@@ -289,7 +164,6 @@
       "key": "billing_address_id"
     },
     {
-      "type": "foreign_key",
       "columns": [
         "installation_address_id"
       ],
@@ -301,7 +175,6 @@
       "key": "installation_address_id"
     },
     {
-      "type": "foreign_key",
       "columns": [
         "subscription_id"
       ],
@@ -313,7 +186,6 @@
       "key": "subscription_id"
     },
     {
-      "type": "foreign_key",
       "columns": [
         "account_id"
       ],
@@ -325,7 +197,6 @@
       "key": "account_id"
     },
     {
-      "type": "foreign_key",
       "columns": [
         "invoice_id"
       ],
@@ -337,7 +208,6 @@
       "key": "invoice_id"
     },
     {
-      "type": "foreign_key",
       "columns": [
         "subscription_id"
       ],
@@ -349,7 +219,6 @@
       "key": "subscription_id"
     },
     {
-      "type": "foreign_key",
       "columns": [
         "account_id"
       ],
@@ -361,7 +230,6 @@
       "key": "account_id"
     },
     {
-      "type": "foreign_key",
       "columns": [
         "order_id"
       ],
@@ -373,7 +241,6 @@
       "key": "order_id"
     },
     {
-      "type": "foreign_key",
       "columns": [
         "product_id"
       ],
@@ -385,7 +252,6 @@
       "key": "product_id"
     },
     {
-      "type": "foreign_key",
       "columns": [
         "account_id"
       ],
@@ -397,7 +263,6 @@
       "key": "account_id"
     },
     {
-      "type": "foreign_key",
       "columns": [
         "account_id"
       ],
@@ -409,7 +274,6 @@
       "key": "account_id"
     },
     {
-      "type": "foreign_key",
       "columns": [
         "payment_plan_id"
       ],
@@ -421,7 +285,6 @@
       "key": "payment_plan_id"
     },
     {
-      "type": "foreign_key",
       "columns": [
         "account_id"
       ],
@@ -433,7 +296,6 @@
       "key": "account_id"
     },
     {
-      "type": "foreign_key",
       "columns": [
         "invoice_id"
       ],
@@ -445,7 +307,6 @@
       "key": "invoice_id"
     },
     {
-      "type": "foreign_key",
       "columns": [
         "payment_id"
       ],
@@ -457,7 +318,6 @@
       "key": "payment_id"
     },
     {
-      "type": "foreign_key",
       "columns": [
         "subscription_id"
       ],
@@ -469,7 +329,6 @@
       "key": "subscription_id"
     },
     {
-      "type": "foreign_key",
       "columns": [
         "discount_id"
       ],
@@ -481,7 +340,6 @@
       "key": "discount_id"
     },
     {
-      "type": "foreign_key",
       "columns": [
         "subscription_id"
       ],
@@ -493,7 +351,6 @@
       "key": "subscription_id"
     },
     {
-      "type": "foreign_key",
       "columns": [
         "account_id"
       ],
@@ -505,7 +362,6 @@
       "key": "account_id"
     },
     {
-      "type": "foreign_key",
       "columns": [
         "product_id"
       ],
@@ -517,7 +373,6 @@
       "key": "product_id"
     },
     {
-      "type": "foreign_key",
       "columns": [
         "account_id"
       ],
@@ -529,7 +384,6 @@
       "key": "account_id"
     },
     {
-      "type": "foreign_key",
       "columns": [
         "agent_id"
       ],
@@ -541,7 +395,6 @@
       "key": "agent_id"
     },
     {
-      "type": "foreign_key",
       "columns": [
         "customer_id"
       ],

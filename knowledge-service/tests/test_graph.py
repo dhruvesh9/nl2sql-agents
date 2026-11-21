@@ -18,7 +18,6 @@ def table(name: Any, description: Any = "", **extra: Any) -> dict[str, Any]:
     return {
         "name": name,
         "description": description,
-        "column_descriptions": {},
         "foreign_keys": [],
     } | extra
 
@@ -67,16 +66,21 @@ def test_clean_text_handles_missing_and_messy_comments(raw: Any, clean: str) -> 
 def test_a_table_without_a_comment_is_kept_and_reported_once() -> None:
     catalog = {"tables": [table("a", None), table("b", "  "), table("c", "C table")]}
     graph, warnings = graph_builder.build_graph(catalog)
-    assert graph.nodes["a"]["description"] == ""
+    assert "description" not in graph.nodes["a"]  # only the id, no empty field
     assert warnings == ["2 tables have no comment: a, b"]
 
 
-def test_only_column_comments_with_text_are_kept() -> None:
-    columns = {"msisdn": " Phone\nnumber ", "status": "", "notes": None}
-    graph, _ = graph_builder.build_graph(
-        {"tables": [table("subs", "S", column_descriptions=columns)]}
-    )
-    assert graph.nodes["subs"]["column_descriptions"] == {"msisdn": "Phone number"}
+def test_an_edge_holds_only_the_tables_and_the_columns() -> None:
+    graph, _ = graph_builder.build_graph(CATALOG)
+    edge = graph.get_edge_data("customers", "addresses", key="billing_address_id")
+    assert edge == {"columns": ["billing_address_id"], "ref_columns": ["id"]}
+
+
+def test_the_graph_holds_no_columns() -> None:
+    # Columns come live from /schema. In the graph they would only make the prompt bigger.
+    catalog = {"tables": [table("subs", "S", column_descriptions={"msisdn": "Phone number"})]}
+    graph, _ = graph_builder.build_graph(catalog)
+    assert graph.nodes["subs"] == {"description": "S"}
 
 
 def test_bad_tables_are_skipped_with_a_warning() -> None:

@@ -42,15 +42,14 @@ class SchemaResponse(BaseModel):
 
 
 class CatalogTable(BaseModel):
-    """One table in GET /catalog. It holds only what the knowledge graph needs.
+    """One table in GET /catalog. It holds only what the table graph needs: tables and foreign keys.
 
-    No column types, primary keys, or nullable flags: the agent reads those live with /schema.
+    No columns, column comments, or types: the agent reads those live with /schema.
     This keeps the answer small for a schema with 1000 tables.
     """
 
     name: str
     description: str | None = None  # the table comment (COMMENT ON TABLE)
-    column_descriptions: dict[str, str]  # column name -> comment, only for columns with a comment
     foreign_keys: list[ForeignKeyInfo]
 
 

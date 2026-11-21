@@ -68,12 +68,14 @@ def _unique_tables(catalog: dict[str, Any], warnings: list[str]) -> dict[str, di
 
 
 def _add_table_node(graph: nx.MultiDiGraph, name: str, table: dict[str, Any]) -> bool:
-    """Add one table node. Return False when the table has no description."""
-    descriptions = table.get("column_descriptions") or {}
-    # Keep only the column comments that hold text. An empty comment tells the LLM nothing.
-    columns = {column: text for column, raw in descriptions.items() if (text := clean_text(raw))}
+    """Add one table node. Return False when the table has no description.
+
+    The node holds no columns. The graph is only for choosing tables (step 2), and the columns
+    of the chosen tables come live from /schema (step 3). Columns here would only add tokens.
+    """
     description = clean_text(table.get("description"))
-    graph.add_node(name, type="table", description=description, column_descriptions=columns)
+    # No description: the node has only its id. An empty field would only add bytes.
+    graph.add_node(name, **({"description": description} if description else {}))
     return bool(description)
 
 
@@ -95,7 +97,6 @@ def _add_foreign_key_edges(
             name,
             target,
             key=",".join(columns),
-            type="foreign_key",
             columns=columns,
             ref_columns=foreign_key.get("ref_columns") or [],
         )

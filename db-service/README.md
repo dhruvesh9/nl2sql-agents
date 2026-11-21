@@ -18,12 +18,12 @@ Use `detail` as feedback for the SQL generator.
 
 Every table in the database, for knowledge-service `POST /generate`.
 It reads the whole schema with the SQLAlchemy `get_multi_*` functions: about 3 catalog queries in total,
-not 5 per table. It returns only comments and foreign keys. Column types come live from `/schema`.
+not 5 per table. It returns only table comments and foreign keys. Column types come live from `/schema`.
 
 ```bash
 curl -s localhost:8001/catalog
 # {"dialect":"postgresql","tables":[{"name":"accounts","description":"Billing accounts. ...",
-#   "column_descriptions":{"status":"Account status: ..."},"foreign_keys":[...]}, ...]}
+#   "foreign_keys":[...]}, ...]}
 ```
 
 ## POST /schema

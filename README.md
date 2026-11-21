@@ -104,7 +104,7 @@ It is built to move to a hosted provider such as Supabase by changing that one v
 ## Measured results
 
 Every agent must reach 90% on its own ground truth before the next agent is built.
-The Table Classifier is scored on 30 questions in [`eval/ground_truth/table_classifier.csv`](eval/ground_truth/table_classifier.csv).
+The Table Classifier is scored on the 30 data questions in [`eval/dataset/questions.toml`](eval/dataset/questions.toml).
 Each expected table list includes the tables on the join path, and the tests check it against the real schema.
 Scoring: PASS is an exact match. WARN means all expected tables plus extra ones, and counts as a success.
 FAIL means a missing table, because a missing table costs a retry loop later.
@@ -178,7 +178,7 @@ and a tracing failure never breaks a request.
 ```bash
 make test         # 189 tests across the four projects (db-service needs the database from step 1)
 make lint         # ruff
-make eval-tables  # score the Table Classifier (needs make knowledge and make agent)
+make eval         # dev eval: classifier, SQL generator, whole system (needs make dbsvc, knowledge, agent)
 ```
 
 The tests need no API key and no running service, except the database for `db-service`.
@@ -194,7 +194,7 @@ db-service/            SQL guard, schema reader, planner, executor     (see its 
 knowledge-service/     knowledge_base/: index, tables, relationships, runbooks    (see its README)
 agent-service/         agents, prompts, LLM client, knowledge client, tracing
 eval/                  ground truth and runners that score each agent
-Makefile               db-load, dbsvc, knowledge, agent, eval-tables, test, lint
+Makefile               db-load, dbsvc, knowledge, agent, eval, test, lint
 ```
 
 ## Roadmap

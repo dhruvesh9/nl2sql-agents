@@ -1,4 +1,4 @@
-.PHONY: help db-load db-local-reset dbsvc knowledge kb-generate agent eval-tables test lint
+.PHONY: help db-load db-local-reset dbsvc knowledge kb-generate agent eval eval-check test lint
 .DEFAULT_GOAL := help
 
 # Plain "make" only prints this list. It never starts anything.
@@ -8,7 +8,7 @@ help:
 	@echo "  make db-local-reset  delete all tables in schema public, then load again"
 	@echo "Run:    make dbsvc | make knowledge | make agent"
 	@echo "KB:     make kb-generate  (build graph.json from the live database; dbsvc and knowledge must run)"
-	@echo "Eval:   make eval-tables  (broken for now: POST /analyze was removed)"
+	@echo "Eval:   make eval  (3 levels, see eval/README.md)"
 	@echo "Check:  make test | make lint"
 
 # The owner of the nl2sql database runs the SQL files.
@@ -42,10 +42,15 @@ kb-generate:
 agent:
 	cd agent-service && .venv/bin/uvicorn app.main:app --port 8000 --reload
 
-# Score the Table Classifier with eval/ground_truth/table_classifier.csv. Start "make agent" first.
-# BROKEN for now: it calls POST /analyze, which agent-service no longer has. The eval will be redone.
-eval-tables:
-	cd eval && .venv/bin/python run_table_classifier.py
+# The dev eval: 3 levels (classifier, sql, system). It needs dbsvc, knowledge, and agent running.
+# It uses the agent-service venv, because levels 1 and 2 call the agent code directly.
+# Examples: make eval   |   make eval ARGS="--level sql --repeat 3"   (see eval/README.md)
+eval:
+	cd agent-service && PYTHONPATH=../eval .venv/bin/python -m run_eval $(ARGS)
+
+# Run every gold SQL on the database. Each must give rows. Needs dbsvc.
+eval-check:
+	cd eval && .venv/bin/python check_gold.py
 
 # Run the tests of all projects. The db-service tests need the database (make db-load).
 test:

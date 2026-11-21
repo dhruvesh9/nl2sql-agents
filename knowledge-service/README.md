@@ -52,7 +52,7 @@ in the agent after the cache time, and a short outage does not stop the agent.
 
 `POST /generate` (or `make kb-generate`) does these steps. No LLM call is made.
 
-1. `GET /catalog` on db-service: every table with its comment, column comments, and foreign keys.
+1. `GET /catalog` on db-service: every table with its comment and foreign keys.
 2. Build a networkx `MultiDiGraph`. A node is a table. An edge is a foreign key, from the table
    that holds the key to the table it points to. A multigraph keeps two keys to the same table
    (for example `customers` -> `addresses` for billing and for installation).
