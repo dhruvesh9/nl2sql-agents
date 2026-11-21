@@ -38,6 +38,7 @@ class Fakes:
         self.received: dict[str, Any] = {}
         monkeypatch.setattr(knowledge, "read_index", lambda: "INDEX")
         monkeypatch.setattr(knowledge, "read_graph", lambda: GRAPH)
+        monkeypatch.setattr(knowledge, "read_runbook", lambda name: f"RUNBOOK {name}")
         monkeypatch.setattr(query_analyzer, "run", self.analyzer)
         monkeypatch.setattr(table_classifier, "run", self.classifier)
         monkeypatch.setattr(db_client, "get_schema", lambda tables, fk_depth: SCHEMA)
@@ -46,7 +47,7 @@ class Fakes:
 
     def analyzer(self, question: str, index_md: str) -> dict[str, Any]:
         self.received["index_md"] = index_md
-        return {"intent": self.intent, "filters": ["year 2025"]}
+        return {"intent": self.intent, "filters": ["year 2025"], "runbook_candidates": ["rb"]}
 
     def classifier(
         self, requirements: dict[str, Any], tables_text: str, **kwargs: Any
@@ -60,6 +61,7 @@ class Fakes:
         self, requirements: dict[str, Any], schema_text: str, *args: Any
     ) -> dict[str, str]:
         self.received["schema_text"] = schema_text
+        self.received["runbook_texts"] = args[0]
         return {"sql": "SELECT id FROM orders", "explanation": "x"}
 
     def run_query(self, sql: str) -> dict[str, Any]:
@@ -88,6 +90,11 @@ def test_each_step_gets_the_output_of_the_step_before(fakes: Fakes) -> None:
     assert fakes.received["tables_text"] == "- orders: Purchase orders."  # from the graph
     assert "orders.account_id -> accounts.id" in fakes.received["relationships_text"]
     assert "TABLE orders" in fakes.received["schema_text"]  # the live schema, as text
+
+
+def test_the_sql_generator_gets_the_runbooks_from_step_1(fakes: Fakes) -> None:
+    quick_pipeline.run_quick("List orders")
+    assert fakes.received["runbook_texts"] == ["RUNBOOK rb"]
 
 
 def test_chitchat_stops_after_step_1(fakes: Fakes) -> None:

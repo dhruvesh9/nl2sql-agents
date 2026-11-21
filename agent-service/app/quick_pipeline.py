@@ -1,7 +1,9 @@
 """Quick end-to-end pipeline: steps 1, 2, 3, 5 and 7, with no feedback loops.
 
 Pipeline step: 1, 2, 3, 5, 7. Used by POST /ask-quick.
-It is a shortcut to see the whole flow work. It skips steps 4 and 6 and the runbooks.
+It is a shortcut to see the whole flow work. It skips steps 4 and 6.
+It sends the runbooks from step 1 to the SQL generator, so business rules (for example
+"unpaid" means status 'O') reach the SQL.
 It runs SQL that no validator checked. Only the SELECT-only guard in db-service protects us.
 POST /ask (pipeline.run_pipeline) is the full flow with Loop A and Loop B.
 """
@@ -48,9 +50,14 @@ def _write_sql(requirements: dict[str, Any], tables: list[str], trace: list[Trac
 
     start = time.perf_counter()
     schema_text = pipeline.schema_to_text(schema)
-    generated = sql_generator.run(requirements, schema_text, [], schema["dialect"])
+    # Load the runbook text only now and only for the names step 1 found: less text, fewer tokens.
+    names = requirements.get("runbook_candidates") or []
+    runbook_texts = [knowledge.read_runbook(name) for name in names]
+    generated = sql_generator.run(requirements, schema_text, runbook_texts, schema["dialect"])
     logger.info("step 5 sql_generator output: %s", generated)
-    trace.append(_trace("5", "sql_generator", start, generated["explanation"]))
+    trace.append(
+        _trace("5", "sql_generator", start, f"runbooks={names}; {generated['explanation']}")
+    )
     return generated["sql"]
 
 
