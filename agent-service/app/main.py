@@ -5,7 +5,6 @@ Pipeline step: infrastructure. Each request opens one Langfuse trace.
 """
 
 import logging
-import uuid
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from typing import Any
@@ -14,16 +13,13 @@ from fastapi import FastAPI, Request, Response
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 
-from app import knowledge, pipeline, quick_pipeline
+from app import knowledge, observability, pipeline, quick_pipeline, tracing, versioning
 from app.agents import response_agent
 from app.config import settings
 from app.models import AskRequest, AskResponse
-from app.tracing import init_tracing, observe, shutdown_tracing
+from app.tracing import init_tracing, shutdown_tracing
 
-logging.basicConfig(
-    level=settings.log_level,
-    format="%(asctime)s %(levelname)s %(name)s: %(message)s",
-)
+observability.setup_logging("agent-service", settings.log_level, settings.log_format)
 logger = logging.getLogger(__name__)
 
 
@@ -36,16 +32,15 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
 
 app = FastAPI(title="agent-service", lifespan=lifespan)
-
-
-def new_request_id() -> str:
-    """A short id for one request. The client gets it back, and the logs show it."""
-    return uuid.uuid4().hex[:12]
+observability.install(app)  # request ID, JSON logs, one log line for each request
 
 
 def _error_json(response: AskResponse) -> JSONResponse:
+    # An error that the middleware did not see (a crash) has no header yet, so we add it here.
     return JSONResponse(
-        status_code=response.http_status, content=response.model_dump(exclude_none=True)
+        status_code=response.http_status,
+        content=response.model_dump(exclude_none=True),
+        headers={observability.REQUEST_ID_HEADER: response.request_id or ""},
     )
 
 
@@ -53,14 +48,14 @@ def _error_json(response: AskResponse) -> JSONResponse:
 # The client never gets FastAPI's default {"detail": ...} and never gets a stack trace.
 @app.exception_handler(RequestValidationError)
 def handle_invalid_request(request: Request, exc: RequestValidationError) -> JSONResponse:
-    return _error_json(response_agent.for_invalid_request(new_request_id()))
+    return _error_json(response_agent.for_invalid_request(observability.current_request_id()))
 
 
 @app.exception_handler(NotImplementedError)
 @app.exception_handler(Exception)
 def handle_any_error(request: Request, exc: Exception) -> JSONResponse:
     # A stub raises NotImplementedError. Any other error that no pipeline caught ends up here too.
-    return _error_json(response_agent.for_error(exc, new_request_id()))
+    return _error_json(response_agent.for_error(exc, observability.current_request_id()))
 
 
 def _trace_output(response: AskResponse) -> dict[str, Any]:
@@ -68,18 +63,25 @@ def _trace_output(response: AskResponse) -> dict[str, Any]:
 
     Only the number of rows is sent, not the rows: they can hold personal data.
     """
-    steps = [entry.model_dump() for entry in response.trace]
-    for step in steps:
-        logger.info(
-            "step %(step)s %(name)s attempt=%(attempt)d %(elapsed_ms)d ms: %(summary)s", step
-        )
     return {
+        "answer": response.answer,
         "code": response.code,
         "rows": len(response.data.rows) if response.data else 0,
         "sql": response.sql,
         "request_id": response.request_id,
-        "steps": steps,
+        "steps": [entry.model_dump() for entry in response.trace],
     }
+
+
+def _record_outcome(trace: Any, response: AskResponse) -> None:
+    """Put the result on the Langfuse trace: the output and two scores to filter and count by.
+
+    outcome: "data" (rows), "text" (an answer without rows), or the error code.
+    """
+    trace.update(output=_trace_output(response))
+    outcome = response.code or ("data" if response.data else "text")
+    tracing.score("outcome", outcome, "CATEGORICAL")
+    tracing.score("rows_returned", len(response.data.rows) if response.data else 0, "NUMERIC")
 
 
 @app.get("/health")
@@ -90,10 +92,13 @@ def health() -> dict[str, str]:
 @app.post("/ask", response_model=AskResponse, response_model_exclude_none=True)
 def ask(request: AskRequest) -> AskResponse:
     """The full pipeline with Loop A and Loop B. See app/pipeline.py. Not implemented yet (501)."""
+    request_id = observability.current_request_id()
     # One trace per request. LLM calls inside the pipeline become children of this trace.
-    with observe("ask", input={"question": request.question}) as trace:
+    with tracing.request_trace(
+        "ask", request_id, {"question": request.question}, versioning.trace_metadata()
+    ) as trace:
         response = pipeline.run_pipeline(request.question)
-        trace.update(output=_trace_output(response))
+        _record_outcome(trace, response)
     return response
 
 
@@ -101,11 +106,13 @@ def ask(request: AskRequest) -> AskResponse:
 def ask_quick(request: AskRequest, http_response: Response) -> AskResponse:
     """Steps 1, 2, 3, 5, 7, 8 with no feedback loops. See app/quick_pipeline.py.
 
-    run_quick never raises: a failure becomes a response of type "error".
+    run_quick never raises: a failure becomes a response with a code.
     """
-    request_id = new_request_id()
-    with observe("ask-quick", input={"question": request.question}) as trace:
+    request_id = observability.current_request_id()
+    with tracing.request_trace(
+        "ask-quick", request_id, {"question": request.question}, versioning.trace_metadata()
+    ) as trace:
         response = quick_pipeline.run_quick(request.question, request_id)
-        trace.update(output=_trace_output(response))
+        _record_outcome(trace, response)
     http_response.status_code = response.http_status
     return response

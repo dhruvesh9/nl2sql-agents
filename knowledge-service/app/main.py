@@ -4,24 +4,21 @@ This service owns the knowledge base (business rules and table descriptions).
 Pipeline step: infrastructure (serves steps 1, 2, and 5 of agent-service).
 """
 
-import logging
 from typing import Any
 
 import httpx
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 
-from app import graph_builder, store
+from app import graph_builder, observability, store
 from app.config import settings
 from app.models import ContentResponse
 
-logging.basicConfig(
-    level=settings.log_level,
-    format="%(asctime)s %(levelname)s %(name)s: %(message)s",
-)
+observability.setup_logging("knowledge-service", settings.log_level, settings.log_format)
 
 # No authentication for now. Later: JWT from Keycloak (user auth and service accounts).
 app = FastAPI(title="knowledge-service")
+observability.install(app)  # request ID, JSON logs, one log line for each request
 
 
 @app.exception_handler(FileNotFoundError)

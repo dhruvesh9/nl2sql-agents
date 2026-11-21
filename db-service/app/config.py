@@ -16,6 +16,9 @@ class Settings(BaseSettings):
     max_rows_limit: int = 1000
     max_fk_depth: int = 3
     log_level: str = "INFO"
+    log_format: str = (
+        "json"  # "json" (one object per line) or "text" (easier to read in a terminal)
+    )
 
 
 settings = Settings()

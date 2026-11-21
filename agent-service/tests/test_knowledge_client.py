@@ -6,7 +6,7 @@ A fake HTTP function replaces httpx.get, so knowledge-service does not need to r
 import httpx
 import pytest
 
-from app import knowledge
+from app import knowledge, observability
 from app.config import settings
 
 
@@ -23,6 +23,7 @@ class FakeService:
     def get(self, url: str, **kwargs) -> httpx.Response:
         self.calls += 1
         assert kwargs["timeout"] > 0  # every call must have a timeout
+        self.headers = kwargs["headers"]
         if self.down:
             raise httpx.ConnectError("service is down")
         body = {"content": self.content} if self.status == 200 else {"detail": "reason text"}
@@ -136,3 +137,12 @@ def test_preload_does_not_stop_the_app_when_the_service_is_down(service: FakeSer
     service.down = True
     knowledge.preload()  # must not raise
     assert knowledge._cache == {}
+
+
+def test_the_request_id_goes_to_knowledge_service_in_the_header(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    service = FakeService(monkeypatch)
+    observability.request_id_var.set("abc12345def")
+    knowledge.read_index()
+    assert service.headers == {"X-Request-ID": "abc12345def"}

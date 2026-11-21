@@ -16,6 +16,9 @@ class Settings(BaseSettings):
     # Long, because a schema with 1000 tables gives a big answer.
     db_service_timeout_seconds: float = 120
     log_level: str = "INFO"
+    log_format: str = (
+        "json"  # "json" (one object per line) or "text" (easier to read in a terminal)
+    )
 
 
 settings = Settings()

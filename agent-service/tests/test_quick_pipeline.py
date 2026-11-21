@@ -83,7 +83,7 @@ def test_happy_path_runs_every_step_and_returns_a_text_and_the_rows(fakes: Fakes
     assert response.data.columns == ["id"]
     assert response.data.rows == [[1], [2]]
     assert response.sql == "SELECT id FROM orders"  # internal: for the logs, not for the client
-    assert [entry.step for entry in response.trace] == ["1", "2", "3", "5", "7"]
+    assert [entry.step for entry in response.trace] == ["1", "2", "3", "5", "7", "8"]
 
 
 def test_each_step_gets_the_output_of_the_step_before(fakes: Fakes) -> None:
@@ -106,7 +106,7 @@ def test_chitchat_gets_a_friendly_text_and_stops_after_step_1(fakes: Fakes) -> N
     assert response.answer == "A friendly reply."
     assert response.data is None
     assert "requirements" not in fakes.received  # no classifier call, no cost, for a greeting
-    assert [entry.name for entry in response.trace] == ["query_analyzer"]
+    assert [entry.name for entry in response.trace] == ["query_analyzer", "response_agent"]
 
 
 def test_no_tables_gets_a_text_before_the_database_is_called(fakes: Fakes) -> None:
@@ -122,7 +122,9 @@ def test_rejected_sql_becomes_an_error_and_the_sql_stays_in_the_trace(fakes: Fak
     response = quick_pipeline.run_quick("q", request_id="abc")
     assert (response.code, response.request_id, response.data) == ("QUERY_FAILED", "abc", None)
     assert "column bad" not in response.answer  # the detail is for the log, not for the user
-    assert "SELECT id FROM orders" in response.trace[-1].summary
+    failed_step = next(entry for entry in response.trace if entry.step == "7")
+    assert "SELECT id FROM orders" in failed_step.summary
+    assert "column bad" in failed_step.summary  # the detail is in the trace, not in the answer
 
 
 def test_an_error_in_any_agent_becomes_an_error_response(
@@ -134,9 +136,10 @@ def test_an_error_in_any_agent_becomes_an_error_response(
     monkeypatch.setattr(table_classifier, "run", down)
     response = quick_pipeline.run_quick("q")
     assert (response.code, response.http_status) == ("LLM_UNAVAILABLE", 503)
-    assert [entry.step for entry in response.trace] == [
-        "1"
-    ]  # the steps before the failure are kept
+    # The steps up to the failure are kept, the failed step says why, and step 8 answered.
+    assert [entry.step for entry in response.trace] == ["1", "2", "8"]
+    assert "timeout" in response.trace[1].summary
+    assert response.trace[-1].summary == "error LLM_UNAVAILABLE"
 
 
 def test_the_client_gets_only_the_answer_the_rows_and_the_ids(fakes: Fakes) -> None:

@@ -82,11 +82,10 @@ def for_error(
     code = error_code(error)
     http_status, text = ERRORS[code]
     # Only an unknown error needs the stack trace. The other errors are known cases.
+    # The request ID is added to the log line by the log handler (see observability.py).
     logger.error(
-        "request %s failed with %s: %s",
-        request_id,
-        code,
-        error,
+        "request failed",
+        extra={"code": code, "http_status": http_status, "error": str(error)},
         exc_info=error if code == "INTERNAL_ERROR" else None,
     )
     return AskResponse(
@@ -94,7 +93,7 @@ def for_error(
         code=code,
         request_id=request_id or None,
         http_status=http_status,
-        trace=trace or [],
+        trace=trace if trace is not None else [],
     )
 
 
@@ -150,7 +149,11 @@ def for_rows(
     More: a fixed text, and the rows in data.
     """
     columns, rows = result["columns"], result["rows"]
-    common = {"request_id": request_id or None, "sql": sql, "trace": trace or []}
+    common = {
+        "request_id": request_id or None,
+        "sql": sql,
+        "trace": trace if trace is not None else [],
+    }
     if not rows or (len(rows) == 1 and len(columns) == 1 and rows[0][0] is None):
         return AskResponse(answer=NO_ROWS_TEXT, **common)
     truncated = bool(result.get("truncated"))
@@ -181,7 +184,7 @@ def for_message(
     return AskResponse(
         answer=text or FALLBACK_TEXT[kind],
         request_id=request_id or None,
-        trace=trace or [],
+        trace=trace if trace is not None else [],
     )
 
 

@@ -3,7 +3,7 @@
 import httpx
 import pytest
 
-from app import db_client
+from app import db_client, observability
 
 
 def fake_post(status_code: int, json_body: dict):
@@ -26,3 +26,16 @@ def test_rejected_sql_raises_error_with_reason(monkeypatch: pytest.MonkeyPatch) 
         db_client.get_plan("DELETE FROM customers")
     assert error.value.status_code == 400
     assert error.value.detail == "Only SELECT is allowed"
+
+
+def test_the_request_id_goes_to_db_service_in_the_header(monkeypatch: pytest.MonkeyPatch) -> None:
+    seen: dict = {}
+
+    def fake(url: str, **kwargs):
+        seen.update(kwargs["headers"])
+        return httpx.Response(200, json={}, request=httpx.Request("POST", url))
+
+    monkeypatch.setattr(httpx, "post", fake)
+    observability.request_id_var.set("abc12345def")
+    db_client.get_plan("SELECT 1")
+    assert seen == {"X-Request-ID": "abc12345def"}

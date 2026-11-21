@@ -2,8 +2,8 @@
 
 Eval step: cost measurement for levels 1 and 2. (Level 3 calls agent-service over HTTP, so the
 tokens are in Langfuse and the logs of that process, not here.)
-app/llm.py logs every call with the token counts as the last log argument. We read that
-argument, so agent-service does not need any change.
+app/llm.py logs every call ("llm_call") with the token counts in the field total_tokens.
+We read that field, so agent-service does not need any change.
 """
 
 import logging
@@ -13,8 +13,8 @@ _TOTALS = {"tokens": 0, "calls": 0}
 
 def _count(record: logging.LogRecord) -> bool:
     """A logging filter. It reads the llm_call records and never blocks a record."""
-    if isinstance(record.args, tuple) and record.args and isinstance(record.args[-1], dict):
-        _TOTALS["tokens"] += record.args[-1].get("total", 0)
+    if record.getMessage() == "llm_call":
+        _TOTALS["tokens"] += getattr(record, "total_tokens", 0)
         _TOTALS["calls"] += 1
     return True
 

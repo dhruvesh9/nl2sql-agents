@@ -3,6 +3,7 @@
 Pipeline step: 7 (SQL Execution, action 7A), db-service side. Used by POST /query.
 """
 
+import logging
 import math
 import time
 from datetime import date
@@ -17,6 +18,8 @@ from app.config import settings
 from app.database import engine, error_message, get_dialect, sql_to_text, start_readonly
 from app.models import QueryResponse
 from app.sql_guard import SqlRejectedError, check_sql
+
+logger = logging.getLogger(__name__)
 
 
 def to_json_safe(value: Any) -> Any:
@@ -71,6 +74,16 @@ def run_query(sql: str, max_rows: int | None) -> QueryResponse:
 
     truncated = len(fetched) > limit
     rows = [[to_json_safe(value) for value in row] for row in fetched[:limit]]
+    # The request log already has the HTTP side. This line has the database side.
+    logger.info(
+        "query executed",
+        extra={
+            "row_count": len(rows),
+            "truncated": truncated,
+            "elapsed_ms": elapsed_ms,
+            "sql": sql,
+        },
+    )
 
     return QueryResponse(
         columns=columns,

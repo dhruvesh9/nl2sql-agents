@@ -70,6 +70,7 @@ def call_llm(system_prompt: str, user_message: str, agent: str = "default") -> s
         as_type="generation",
         model=options["model"],
         input=messages,
+        metadata={"agent": agent},
         model_parameters={**request, "reasoning": options["reasoning_enabled"]},
     ) as generation:
         start = time.perf_counter()
@@ -90,23 +91,45 @@ def call_llm(system_prompt: str, user_message: str, agent: str = "default") -> s
                 if getattr(chunk, "usage", None):  # the last chunk can hold the token counts
                     usage = _usage_as_dict(chunk)
         except RateLimitError as error:
+            _log_failure(agent, options["model"], "rate_limited", start, error)
             raise LlmError("rate_limited", str(error)) from error
         except TogetherError as error:
             # Timeout, no connection, 5xx, bad key: for the user these are all "not available".
+            _log_failure(agent, options["model"], "unavailable", start, error)
             raise LlmError("unavailable", f"{type(error).__name__}: {error}") from error
         text = "".join(parts)
         elapsed_ms = int((time.perf_counter() - start) * 1000)
         generation.update(output=text, usage_details=usage)
 
+    # The message stays the same for every call. The changing values are fields, so a log tool
+    # can answer "how many tokens did table_classifier use today?".
     logger.info(
-        "llm_call agent=%s model=%s reasoning=%s elapsed_ms=%d usage=%s",
-        agent,
-        options["model"],
-        options["reasoning_enabled"],
-        elapsed_ms,
-        usage,
+        "llm_call",
+        extra={
+            "agent": agent,
+            "model": options["model"],
+            "reasoning": options["reasoning_enabled"],
+            "elapsed_ms": elapsed_ms,
+            "input_tokens": usage.get("input", 0),
+            "output_tokens": usage.get("output", 0),
+            "total_tokens": usage.get("total", 0),
+        },
     )
     return text
+
+
+def _log_failure(agent: str, model: str, kind: str, start: float, error: Exception) -> None:
+    """Log a failed LLM call with the reason. The caller then raises LlmError."""
+    logger.warning(
+        "llm_call failed",
+        extra={
+            "agent": agent,
+            "model": model,
+            "kind": kind,
+            "elapsed_ms": int((time.perf_counter() - start) * 1000),
+            "error": f"{type(error).__name__}: {error}",
+        },
+    )
 
 
 def _usage_as_dict(response: Any) -> dict[str, int]:

@@ -79,3 +79,9 @@ curl -s -X POST localhost:8001/query -H 'Content-Type: application/json' \
 cd db-service && .venv/bin/pytest -q
 ```
 The database tests skip when PostgreSQL is not running.
+
+## Request ID and logs
+
+Every request has a request ID (the `X-Request-ID` header, or a new one). It is in every log line and in the
+response header. Logs are JSON, one object per line (`LOG_FORMAT=text` for a terminal). Each request writes one
+`request` line with the method, path, status, and `duration_ms`.

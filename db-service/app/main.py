@@ -9,7 +9,7 @@ import logging
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 
-from app import executor, planner, schema_reader
+from app import executor, observability, planner, schema_reader
 from app.config import settings
 from app.database import check_connection
 from app.models import (
@@ -23,13 +23,12 @@ from app.models import (
 )
 from app.sql_guard import SqlRejectedError
 
-logging.basicConfig(
-    level=settings.log_level,
-    format="%(asctime)s %(levelname)s %(name)s: %(message)s",
-)
+logger = logging.getLogger(__name__)
+observability.setup_logging("db-service", settings.log_level, settings.log_format)
 
 # No authentication for now. Later: JWT from Keycloak (user auth and service accounts).
 app = FastAPI(title="db-service")
+observability.install(app)  # request ID, JSON logs, one log line for each request
 
 
 @app.exception_handler(NotImplementedError)
@@ -40,6 +39,8 @@ def handle_not_implemented(request: Request, exc: NotImplementedError) -> JSONRe
 
 @app.exception_handler(SqlRejectedError)
 def handle_sql_rejected(request: Request, exc: SqlRejectedError) -> JSONResponse:
+    # A rejected SQL is normal here (the agent sent a bad query). The reason helps to find the cause.
+    logger.warning("sql rejected", extra={"reason": str(exc)})
     return JSONResponse(status_code=400, content={"detail": str(exc)})
 
 

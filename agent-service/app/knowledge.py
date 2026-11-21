@@ -15,6 +15,7 @@ from typing import Any
 import httpx
 
 from app.config import settings
+from app.observability import REQUEST_ID_HEADER, current_request_id
 
 logger = logging.getLogger(__name__)
 
@@ -33,13 +34,23 @@ class KnowledgeServiceError(Exception):
 
 def _fetch(path: str) -> Any:
     """Send one GET request. Return the parsed JSON answer. Raise KnowledgeServiceError on a problem."""
+    start = time.perf_counter()
     try:
         response = httpx.get(
             f"{settings.knowledge_service_url}{path}",
             timeout=settings.knowledge_service_timeout_seconds,
+            headers={REQUEST_ID_HEADER: current_request_id()},
         )
     except httpx.HTTPError as error:
         raise KnowledgeServiceError(503, f"cannot reach knowledge-service: {error}") from error
+    logger.info(
+        "knowledge_service call",
+        extra={
+            "path": path,
+            "status": response.status_code,
+            "elapsed_ms": int((time.perf_counter() - start) * 1000),
+        },
+    )
 
     if response.status_code >= 400:
         # FastAPI sends the reason as {"detail": "..."}. Keep it.
@@ -56,6 +67,7 @@ def _get(path: str) -> Any:
     now = time.monotonic()
     cached = _cache.get(path)
     if cached and now - cached[0] < settings.knowledge_cache_ttl_seconds:
+        logger.debug("knowledge cache hit", extra={"path": path})
         return cached[1]
 
     try:

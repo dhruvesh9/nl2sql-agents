@@ -51,6 +51,11 @@ class Settings(BaseSettings):
     max_sql_attempts: int = 3
     pass_score: int = 80
     log_level: str = "INFO"
+    # "json" (one object per line) or "text" (easier to read in a terminal).
+    log_format: str = "json"
+    # Sent to Langfuse with every trace, so you can filter by environment and version.
+    environment: str = "local"
+    app_version: str = "dev"
     langfuse_enabled: bool = False
     langfuse_public_key: str = ""
     langfuse_secret_key: str = ""

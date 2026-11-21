@@ -3,11 +3,16 @@
 Pipeline step: 3 (get_schema), 6 (get_plan), 7 (run_query).
 """
 
+import logging
+import time
 from typing import Any
 
 import httpx
 
 from app.config import settings
+from app.observability import REQUEST_ID_HEADER, current_request_id
+
+logger = logging.getLogger(__name__)
 
 
 class DbServiceError(Exception):
@@ -24,11 +29,31 @@ class DbServiceError(Exception):
 
 
 def _post(path: str, body: dict[str, Any]) -> dict[str, Any]:
-    """Send one POST request to db-service with a timeout."""
-    response = httpx.post(
-        f"{settings.db_service_url}{path}",
-        json=body,
-        timeout=settings.db_service_timeout_seconds,
+    """Send one POST request to db-service with a timeout.
+
+    The request ID goes in the header, so the db-service logs show which question this call is for.
+    """
+    start = time.perf_counter()
+    try:
+        response = httpx.post(
+            f"{settings.db_service_url}{path}",
+            json=body,
+            timeout=settings.db_service_timeout_seconds,
+            headers={REQUEST_ID_HEADER: current_request_id()},
+        )
+    except httpx.HTTPError as error:
+        logger.warning(
+            "db_service call failed",
+            extra={"path": path, "error": f"{type(error).__name__}: {error}"},
+        )
+        raise
+    logger.info(
+        "db_service call",
+        extra={
+            "path": path,
+            "status": response.status_code,
+            "elapsed_ms": int((time.perf_counter() - start) * 1000),
+        },
     )
     if response.status_code >= 400:
         # FastAPI sends the reason as {"detail": "..."}. Keep it, because the agent needs it.
