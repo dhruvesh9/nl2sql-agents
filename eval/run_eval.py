@@ -19,6 +19,7 @@ import logging
 import sys
 import time
 from collections.abc import Callable
+from pathlib import Path
 from typing import Any
 
 import dataset
@@ -136,7 +137,11 @@ def main() -> int:
     print(f"\nsaved: {report.save_run(summary, details)}")
 
     if args.baseline:
-        with open(args.baseline, encoding="utf-8") as file:
+        # make eval runs in agent-service/, so also accept a path from the project root.
+        baseline = Path(args.baseline)
+        if not baseline.exists():
+            baseline = Path(__file__).resolve().parents[1] / args.baseline
+        with baseline.open(encoding="utf-8") as file:
             problems = report.regressions(summary, json.load(file), args.max_drop)
         if problems:
             print("\nREGRESSION:", *problems, sep="\n  ")

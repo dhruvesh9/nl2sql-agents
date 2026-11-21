@@ -15,6 +15,10 @@ def schema_to_text(schema: dict[str, Any]) -> str:
         TABLE orders (Orders placed by an account)
           id INTEGER PK
           account_id INTEGER FK->accounts.id
+          status VARCHAR(10) -- Order status: NEW, SHIPPED, or DONE.
+
+    The text after "--" is the column comment from the database. It lists the exact code values,
+    so the SQL generator writes 'NEW' and not a guess like 'new'.
     """
     lines: list[str] = []
     for table in schema["tables"]:
@@ -33,7 +37,10 @@ def schema_to_text(schema: dict[str, Any]) -> str:
                 parts.append("PK")
             if column["name"] in references:
                 parts.append(f"FK->{references[column['name']]}")
-            lines.append("  " + " ".join(parts))
+            line = "  " + " ".join(parts)
+            if column.get("description"):
+                line += f" -- {' '.join(column['description'].split())}"
+            lines.append(line)
     return "\n".join(lines)
 
 
