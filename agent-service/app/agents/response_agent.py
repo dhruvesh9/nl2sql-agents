@@ -36,12 +36,22 @@ logger = logging.getLogger(__name__)
 
 PROMPT_FILE = Path(__file__).parent.parent / "prompts" / "response_agent.md"
 
+READ_ONLY_TEXT = (
+    "I can only read data. I cannot change, delete, or add anything. "
+    "You can ask me a question about the data instead."
+)
+
 # code -> (HTTP status, text for the user). The text never holds details of the real error.
 ERRORS: dict[str, tuple[int, str]] = {
     "LLM_BUSY": (503, "The AI service is busy right now. Please try again in a minute."),
     "LLM_UNAVAILABLE": (503, "The AI service is not available. Please try again later."),
     "LLM_BAD_OUTPUT": (502, "I could not work out an answer. Please ask in another way."),
     "TIMEOUT": (504, "That took too long. Please try again, or ask a simpler question."),
+    "DATA_CHANGE_NOT_ALLOWED": (200, READ_ONLY_TEXT),
+    "REQUEST_BLOCKED": (
+        200,
+        "I cannot follow that request. I can answer questions about the company data.",
+    ),
     "NOT_FOUND": (404, "This address does not exist."),
     "METHOD_NOT_ALLOWED": (405, "This address does not accept that kind of request."),
     "QUERY_FAILED": (
@@ -223,6 +233,31 @@ def for_invalid_request(request_id: str = "") -> AskResponse:
         code="INVALID_REQUEST",
         request_id=request_id or None,
         http_status=http_status,
+    )
+
+
+# The Query Analyzer guardrail value -> the code of the refusal.
+BLOCKED_CODES = {"data_change": "DATA_CHANGE_NOT_ALLOWED", "prompt_injection": "REQUEST_BLOCKED"}
+
+
+def for_blocked(
+    guardrail: str, request_id: str = "", trace: list[TraceEntry] | None = None
+) -> AskResponse:
+    """Build the refusal for a request that the guardrail stopped. No LLM writes this text.
+
+    The text is fixed on purpose. A message that tries to take control of the assistant could also
+    take control of an LLM that writes the refusal. A fixed text cannot be talked out of it.
+    The log line is a security event: it shows who tried what.
+    """
+    code = BLOCKED_CODES[guardrail]
+    http_status, text = ERRORS[code]
+    logger.warning("guardrail blocked the request", extra={"guardrail": guardrail, "code": code})
+    return AskResponse(
+        answer=text,
+        code=code,
+        request_id=request_id or None,
+        http_status=http_status,
+        trace=trace if trace is not None else [],
     )
 
 

@@ -19,6 +19,7 @@ Start `make dbsvc`, `make knowledge`, and `make agent`. Then, from the project r
 make eval                                    # all levels, dev split, 1 attempt
 make eval ARGS="--level sql"                 # one level: classifier, sql, or system
 make eval ARGS="--limit 5"                   # the first 5 questions (a quick check)
+make eval ARGS="--ids R09,T31 --split all"   # only these questions (use --split all for ids from both splits)
 make eval ARGS="--repeat 3"                  # each question 3 times: mean, min, max, unstable questions
 make eval ARGS="--endpoint ask"              # level 3 against POST /ask (when it exists)
 make eval ARGS="--split test"                # the held-out split. Use it to report, not to tune.

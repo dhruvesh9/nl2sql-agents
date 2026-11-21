@@ -19,8 +19,13 @@ def expects_refusal(row: dict[str, Any]) -> bool:
     return row["category"] in REFUSE_CATEGORIES
 
 
-def load_questions(split: str = "all", limit: int | None = None) -> list[dict[str, Any]]:
-    """Return the questions of one split ("dev", "test", or "all"). Fill the optional fields."""
+def load_questions(
+    split: str = "all", limit: int | None = None, ids: list[str] | None = None
+) -> list[dict[str, Any]]:
+    """Return the questions of one split ("dev", "test", or "all"). Fill the optional fields.
+
+    ids keeps only those questions (for a quick run of a few questions, for example after a prompt change).
+    """
     with DATASET_FILE.open("rb") as file:
         rows = tomllib.load(file)["question"]
     for row in rows:
@@ -30,4 +35,6 @@ def load_questions(split: str = "all", limit: int | None = None) -> list[dict[st
         row.setdefault("ordered", False)
     if split != "all":
         rows = [row for row in rows if row["split"] == split]
+    if ids:
+        rows = [row for row in rows if row["id"] in ids]
     return rows[:limit] if limit else rows

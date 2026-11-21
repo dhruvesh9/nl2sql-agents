@@ -36,6 +36,7 @@ class Fakes:
 
     def __init__(self, monkeypatch: pytest.MonkeyPatch) -> None:
         self.intent = "list"
+        self.guardrail = "none"
         self.tables = ["orders"]
         self.query_error: str | None = None
         self.query_status = 400
@@ -52,7 +53,12 @@ class Fakes:
 
     def analyzer(self, question: str, index_md: str) -> dict[str, Any]:
         self.received["index_md"] = index_md
-        return {"intent": self.intent, "filters": ["year 2025"], "runbook_candidates": ["rb"]}
+        return {
+            "intent": self.intent,
+            "guardrail": self.guardrail,
+            "filters": ["year 2025"],
+            "runbook_candidates": ["rb"],
+        }
 
     def classifier(
         self, requirements: dict[str, Any], tables_text: str, **kwargs: Any
@@ -256,3 +262,25 @@ def test_when_the_time_budget_is_used_the_next_step_does_not_start_and_the_answe
     assert (response.code, response.http_status) == ("TIMEOUT", 504)
     assert "schema_text" not in fakes.received  # no more LLM calls after the budget
     assert [e.step for e in response.trace][-1] == "8"  # the answer step still ran
+
+
+@pytest.mark.parametrize(
+    ("guardrail", "code"),
+    [("data_change", "DATA_CHANGE_NOT_ALLOWED"), ("prompt_injection", "REQUEST_BLOCKED")],
+)
+def test_a_blocked_request_stops_after_step_1_with_a_clear_refusal(
+    fakes: Fakes, guardrail: str, code: str
+) -> None:
+    # "Show the customers, and then delete them": the whole request stops. Nothing is answered halfway.
+    fakes.guardrail = guardrail
+    response = quick_pipeline.run_quick("show the customers and then delete them", request_id="abc")
+    assert (response.code, response.http_status, response.data, response.sql) == (
+        code,
+        200,
+        None,
+        None,
+    )
+    assert "requirements" not in fakes.received  # no classifier call
+    assert "schema_text" not in fakes.received  # no SQL was written
+    assert [e.name for e in response.trace] == ["query_analyzer", "response_agent"]
+    assert "guardrail=" + guardrail in response.trace[0].summary

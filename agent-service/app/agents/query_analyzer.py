@@ -3,16 +3,22 @@
 Pipeline step: 1. Prompt file: app/prompts/query_analyzer.md.
 """
 
+import logging
 from copy import deepcopy
 from pathlib import Path
 from typing import Any
 
 from app.llm import call_llm_json
 
+logger = logging.getLogger(__name__)
+
+GUARDRAILS = {"none", "data_change", "prompt_injection"}
+
 PROMPT_FILE = Path(__file__).parent.parent / "prompts" / "query_analyzer.md"
 
 # Every answer must have these keys. A missing key gets this default value.
 DEFAULTS: dict[str, Any] = {
+    "guardrail": "none",
     "intent": "",
     "requested_fields": [],
     "filters": [],
@@ -25,7 +31,7 @@ DEFAULTS: dict[str, Any] = {
 def run(question: str, index_md: str) -> dict[str, Any]:
     """Analyze the question. Return the requirements as a dict.
 
-    Output keys: intent, requested_fields, filters, aggregations, business_concepts,
+    Output keys: guardrail, intent, requested_fields, filters, aggregations, business_concepts,
     runbook_candidates.
 
     Example:
@@ -43,6 +49,15 @@ def run(question: str, index_md: str) -> dict[str, Any]:
     # deepcopy gives each answer its own lists. A shared list would keep changes from other requests.
     for key, default in DEFAULTS.items():
         result.setdefault(key, deepcopy(default))
+
+    # A guardrail that is not one of the three words is not trusted as a block, and not used.
+    # The SQL guard and the read-only transaction in db-service still protect the data.
+    # isinstance first: a list or a dict is not hashable, and "in a set" would raise TypeError.
+    if not isinstance(result["guardrail"], str) or result["guardrail"] not in GUARDRAILS:
+        logger.warning(
+            "query_analyzer: unknown guardrail value", extra={"value": str(result["guardrail"])}
+        )
+        result["guardrail"] = "none"
 
     # The LLM can invent a runbook name, or send something that is not a list (for example null).
     # Keep only the names that the index lists. In index.md, each name is between backticks.

@@ -227,3 +227,25 @@ def test_an_http_error_of_the_framework_gets_the_same_shape(status: int, code: s
     response = response_agent.for_http_error(status, "r1")
     assert (response.code, response.http_status, response.request_id) == (code, status, "r1")
     assert response.answer == response_agent.ERRORS[code][1]
+
+
+@pytest.mark.parametrize(
+    ("guardrail", "code"),
+    [("data_change", "DATA_CHANGE_NOT_ALLOWED"), ("prompt_injection", "REQUEST_BLOCKED")],
+)
+def test_a_blocked_request_gets_a_fixed_refusal_and_no_llm_call(
+    monkeypatch: pytest.MonkeyPatch, guardrail: str, code: str
+) -> None:
+    def must_not_run(*args: Any, **kwargs: Any) -> str:
+        raise AssertionError("the refusal must not be written by an LLM")
+
+    monkeypatch.setattr(response_agent, "call_llm", must_not_run)
+    response = response_agent.for_blocked(guardrail, "r1")
+    assert (response.code, response.http_status, response.data) == (code, 200, None)
+    assert response.answer == response_agent.ERRORS[code][1]
+    assert response.request_id == "r1"
+
+
+def test_the_data_change_refusal_says_what_the_assistant_can_do() -> None:
+    text = response_agent.ERRORS["DATA_CHANGE_NOT_ALLOWED"][1]
+    assert "only read data" in text

@@ -121,8 +121,7 @@ def run_system(row: dict, endpoint: str, gold_cache: dict) -> dict[str, Any]:
         return {"kind": "refuse", "status": "ANSWERED" if answered else "REFUSED", "detail": ""}
     if not answered:
         return {"kind": "answer", "status": "FAILED", "detail": body["answer"]}
-    rows = [list(item.values()) for item in body["data"]]  # a JSON object keeps the column order
     status, detail = _grade_rows(
-        row, {"rows": rows, "truncated": body.get("truncated")}, gold_cache
-    )
+        row, body["data"], gold_cache
+    )  # data has columns, rows and truncated
     return {"kind": "answer", "status": status, "detail": detail}

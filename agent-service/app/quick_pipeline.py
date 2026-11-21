@@ -1,6 +1,7 @@
 """Quick end-to-end pipeline: steps 1, 2, 3, 5, 7 and 8, with no feedback loops.
 
 Pipeline step: 1, 2, 3, 5, 7, 8. Used by POST /ask-quick.
+Step 1 also checks the guardrail (a request to change data, or a prompt injection): it stops here.
 The steps raise errors when they fail. run_quick catches every error in ONE place and gives it
 to the Response Agent (step 8), which builds the client response. The steps write no messages.
 It is a shortcut to see the whole flow work. It skips steps 4 and 6.
@@ -125,8 +126,17 @@ def _run(question: str, trace: list[TraceEntry], request_id: str) -> AskResponse
     """The steps in order. Any failure is raised, and run_quick turns it into a response."""
     with step(trace, "1", "query_analyzer", "agent", question=question) as out:
         requirements = query_analyzer.run(question, knowledge.read_index())
-        out["summary"] = f"intent={requirements['intent']}"
+        out["summary"] = f"intent={requirements['intent']}; guardrail={requirements['guardrail']}"
         out["output"] = requirements
+
+    # The guardrail comes first: a request to change data, or to take over the assistant, stops here.
+    # It stops the whole request, also when only a part of the message is the problem. This saves
+    # the other LLM calls, and the user learns at once that the request was not done.
+    if requirements["guardrail"] != "none":
+        return _respond(
+            trace,
+            lambda: response_agent.for_blocked(requirements["guardrail"], request_id, trace),
+        )
 
     # A greeting ("hello") needs no tables, so we stop before any more LLM calls.
     if requirements["intent"] == "chitchat":

@@ -6,6 +6,7 @@ Run it from the agent-service folder with its venv, because levels 1 and 2 impor
 Examples:
     make eval                                   # all levels, dev split, one attempt
     make eval ARGS="--level classifier --limit 5"
+    make eval ARGS="--ids R09,R10,T31"          # only these questions
     make eval ARGS="--repeat 3"                 # run each question 3 times, report the spread
     make eval ARGS="--endpoint ask"             # level 3 against the full pipeline
     make eval ARGS="--baseline results/run_X/summary.json"   # exit 1 if a number fell
@@ -112,6 +113,9 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--split", choices=["dev", "test", "all"], default="dev")
     parser.add_argument("--repeat", type=int, default=1, help="attempts per question")
     parser.add_argument("--limit", type=int, default=None, help="only the first N questions")
+    parser.add_argument(
+        "--ids", help="only these question ids, separated by commas (for example R09,T31)"
+    )
     parser.add_argument("--endpoint", choices=["ask-quick", "ask"], default="ask-quick")
     parser.add_argument("--baseline", help="summary.json of an earlier run")
     parser.add_argument(
@@ -127,7 +131,8 @@ def main() -> int:
         logging.getLogger(noisy).setLevel(logging.WARNING)
     usage.start_counting()
 
-    rows = dataset.load_questions(args.split, args.limit)
+    ids = args.ids.split(",") if args.ids else None
+    rows = dataset.load_questions(args.split, args.limit, ids)
     level_names = LEVELS if args.level == "all" else [args.level]
     logger.info("%d questions, levels %s, %d attempt(s)", len(rows), level_names, args.repeat)
 
