@@ -37,6 +37,11 @@ class Settings(BaseSettings):
     sql_validator: LlmParams = LlmParams()
     # The Response Agent writes short replies (greetings). Thinking would only add delay.
     response_agent: LlmParams = LlmParams(reasoning_enabled=False)
+    # One LLM call may take at most this long. The SDK retries 429, 5xx, and timeouts with backoff.
+    llm_timeout_seconds: float = 60
+    llm_max_retries: int = 2
+    # The whole request (all steps) may take at most this long. Checked before each step.
+    request_timeout_seconds: float = 120
     db_service_url: str = "http://localhost:8001"
     db_service_timeout_seconds: float = 30
     knowledge_service_url: str = "http://localhost:8002"

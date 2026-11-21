@@ -4,6 +4,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app import store
+from app.main import app
 
 DOCUMENT_PATHS = ["/index", "/runbooks/invoice_status"]
 
@@ -60,3 +61,11 @@ def test_the_store_only_reads_inside_the_runbooks_folder(kb) -> None:
         store.read_runbook("../secret")
     with pytest.raises(FileNotFoundError):
         store.read_runbook("secret")  # secret.md exists, but not in runbooks/
+
+
+def test_a_damaged_graph_file_gives_json_500_with_the_request_id(kb) -> None:
+    (kb / "graph.json").write_text("{ this is not json", encoding="utf-8")
+    crash_client = TestClient(app, raise_server_exceptions=False)
+    response = crash_client.get("/graph", headers={"X-Request-ID": "request-id-12345"})
+    assert response.status_code == 500
+    assert response.json() == {"detail": "Internal server error", "request_id": "request-id-12345"}

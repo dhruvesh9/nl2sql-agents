@@ -5,11 +5,13 @@ Pipeline step: infrastructure.
 
 import logging
 
+import psycopg
 from sqlalchemy import Connection, create_engine, text
 from sqlalchemy.exc import DBAPIError
 from sqlalchemy.sql.elements import TextClause
 
 from app.config import settings
+from app.sql_guard import SqlRejectedError
 
 logger = logging.getLogger(__name__)
 
@@ -42,6 +44,43 @@ def start_readonly(conn: Connection) -> None:
     """
     conn.execute(text("SET TRANSACTION READ ONLY"))
     conn.execute(text(f"SET LOCAL statement_timeout = {int(settings.statement_timeout_ms)}"))
+
+
+class QueryTimeoutError(Exception):
+    """The statement timeout stopped the query. The API returns HTTP 504."""
+
+
+class DatabaseUnavailableError(Exception):
+    """The database cannot be reached, or it is out of connections. The API returns HTTP 503."""
+
+
+# SQLSTATE codes (PostgreSQL error classes) that tell us the database itself has a problem:
+# 08 = connection failed, 53 = out of resources (for example too many connections),
+# 57P = the server is shutting down or restarting.
+_UNAVAILABLE_PREFIXES = ("08", "53", "57P")
+_QUERY_CANCELED = "57014"  # raised by statement_timeout
+
+
+def classify_error(error: DBAPIError) -> Exception:
+    """Return the right error for a database error. The caller raises it.
+
+    - SQLSTATE 57014 (statement timeout): QueryTimeoutError. The query was valid but too slow.
+    - No connection, or the server is out of resources: DatabaseUnavailableError. Not the fault of the SQL.
+    - Anything else (wrong column, syntax, ...): SqlRejectedError. The agent can fix its SQL.
+    A timeout or a lost connection must not look like "wrong SQL": the user would get the wrong message,
+    and the SQL generator would "fix" a query that was not wrong.
+    """
+    sqlstate = getattr(error.orig, "sqlstate", None)
+    if sqlstate == _QUERY_CANCELED:
+        return QueryTimeoutError("The query took too long and was stopped.")
+    no_connection = sqlstate is None and isinstance(error.orig, psycopg.OperationalError)
+    if (
+        error.connection_invalidated
+        or no_connection
+        or str(sqlstate).startswith(_UNAVAILABLE_PREFIXES)
+    ):
+        return DatabaseUnavailableError("The database is not available.")
+    return SqlRejectedError(error_message(error))
 
 
 def error_message(error: DBAPIError) -> str:

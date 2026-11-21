@@ -18,6 +18,22 @@ from app.knowledge import KnowledgeServiceError
         (LlmError("rate_limited", "x"), "LLM_BUSY"),
         (LlmError("unavailable", "x"), "LLM_UNAVAILABLE"),
         (LlmError("bad_output", "x"), "LLM_BAD_OUTPUT"),
+        (LlmError("timeout", "x"), "TIMEOUT"),
+        (httpx.ReadTimeout("slow"), "TIMEOUT"),
+        (httpx.ConnectTimeout("slow"), "TIMEOUT"),
+        (TimeoutError("budget used"), "TIMEOUT"),
+        (DbServiceError(504, "query too long"), "TIMEOUT"),
+        (DbServiceError(408, "x"), "TIMEOUT"),
+        (DbServiceError(500, "boom"), "SERVICE_UNAVAILABLE"),
+        (DbServiceError(502, "x"), "SERVICE_UNAVAILABLE"),
+        (DbServiceError(429, "x"), "SERVICE_UNAVAILABLE"),
+        (DbServiceError(404, "x"), "INTERNAL_ERROR"),
+        (DbServiceError(422, "x"), "INTERNAL_ERROR"),
+        (DbServiceError(401, "x"), "INTERNAL_ERROR"),
+        (KnowledgeServiceError(504, "slow"), "TIMEOUT"),
+        (KnowledgeServiceError(404, "run POST /generate first"), "SERVICE_UNAVAILABLE"),
+        (KnowledgeServiceError(400, "bad name"), "INTERNAL_ERROR"),
+        (KnowledgeServiceError(500, "boom"), "SERVICE_UNAVAILABLE"),
         (DbServiceError(400, "bad column"), "QUERY_FAILED"),
         (DbServiceError(503, "down"), "SERVICE_UNAVAILABLE"),
         (KnowledgeServiceError(503, "down"), "SERVICE_UNAVAILABLE"),
@@ -195,3 +211,19 @@ def test_an_empty_llm_text_gives_the_fixed_text(monkeypatch: pytest.MonkeyPatch)
     monkeypatch.setattr(response_agent, "call_llm", lambda *args, **kwargs: "   ")
     response = response_agent.for_message("chitchat", "hello")
     assert response.answer == response_agent.FALLBACK_TEXT["chitchat"]
+
+
+@pytest.mark.parametrize(
+    ("status", "code"),
+    [
+        (404, "NOT_FOUND"),
+        (405, "METHOD_NOT_ALLOWED"),
+        (413, "INVALID_REQUEST"),
+        (400, "INVALID_REQUEST"),
+        (500, "INTERNAL_ERROR"),
+    ],
+)
+def test_an_http_error_of_the_framework_gets_the_same_shape(status: int, code: str) -> None:
+    response = response_agent.for_http_error(status, "r1")
+    assert (response.code, response.http_status, response.request_id) == (code, status, "r1")
+    assert response.answer == response_agent.ERRORS[code][1]

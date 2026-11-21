@@ -41,6 +41,9 @@ ERRORS: dict[str, tuple[int, str]] = {
     "LLM_BUSY": (503, "The AI service is busy right now. Please try again in a minute."),
     "LLM_UNAVAILABLE": (503, "The AI service is not available. Please try again later."),
     "LLM_BAD_OUTPUT": (502, "I could not work out an answer. Please ask in another way."),
+    "TIMEOUT": (504, "That took too long. Please try again, or ask a simpler question."),
+    "NOT_FOUND": (404, "This address does not exist."),
+    "METHOD_NOT_ALLOWED": (405, "This address does not accept that kind of request."),
     "QUERY_FAILED": (
         200,
         "I could not build a valid query for that question. Please ask in another way.",
@@ -59,16 +62,40 @@ FALLBACK_TEXT = {
 NO_ROWS_TEXT = "No data matches your question."
 
 
+def _status_code(status: int, not_found_is_unavailable: bool = False) -> str:
+    """Map the HTTP status of another service to a code.
+
+    400 = the service rejected the request (for db-service: the SQL). 408 and 504 = too slow.
+    5xx, 429 = the service has a problem or is busy. Any other 4xx (401, 403, 404, 422) means our
+    own request or setting is wrong, which is a bug on our side: INTERNAL_ERROR.
+    A 404 from knowledge-service means its files are not ready (no graph.json yet): "unavailable".
+    """
+    if status == 400:
+        return "QUERY_FAILED"
+    if status in (408, 504):
+        return "TIMEOUT"
+    if status == 429 or status >= 500 or (status == 404 and not_found_is_unavailable):
+        return "SERVICE_UNAVAILABLE"
+    return "INTERNAL_ERROR"
+
+
 def error_code(error: Exception) -> str:
     """Return the code for an error. An unknown error gives INTERNAL_ERROR."""
     if isinstance(error, LlmError):
-        return {"rate_limited": "LLM_BUSY", "unavailable": "LLM_UNAVAILABLE"}.get(
-            error.kind, "LLM_BAD_OUTPUT"
-        )
+        return {
+            "rate_limited": "LLM_BUSY",
+            "unavailable": "LLM_UNAVAILABLE",
+            "timeout": "TIMEOUT",
+        }.get(error.kind, "LLM_BAD_OUTPUT")
     if isinstance(error, DbServiceError):
-        # 400 means db-service rejected the SQL. Any other status means db-service has a problem.
-        return "QUERY_FAILED" if error.status_code == 400 else "SERVICE_UNAVAILABLE"
-    if isinstance(error, KnowledgeServiceError | httpx.HTTPError):
+        return _status_code(error.status_code)
+    if isinstance(error, KnowledgeServiceError):
+        # knowledge-service never rejects a SQL, so a 400 from it is our bug, not "query failed".
+        code = _status_code(error.status_code, not_found_is_unavailable=True)
+        return "INTERNAL_ERROR" if code == "QUERY_FAILED" else code
+    if isinstance(error, httpx.TimeoutException | TimeoutError):
+        return "TIMEOUT"
+    if isinstance(error, httpx.HTTPError):
         return "SERVICE_UNAVAILABLE"
     if isinstance(error, NotImplementedError):
         return "NOT_IMPLEMENTED"
@@ -197,3 +224,15 @@ def for_invalid_request(request_id: str = "") -> AskResponse:
         request_id=request_id or None,
         http_status=http_status,
     )
+
+
+def for_http_error(status: int, request_id: str = "") -> AskResponse:
+    """Build the response for an HTTP error that FastAPI raises: unknown path, wrong method.
+
+    The client always gets the same shape, also for a path that does not exist.
+    """
+    code = {404: "NOT_FOUND", 405: "METHOD_NOT_ALLOWED"}.get(status)
+    if code is None:
+        code = "INVALID_REQUEST" if status < 500 else "INTERNAL_ERROR"
+    _, text = ERRORS[code]
+    return AskResponse(answer=text, code=code, request_id=request_id or None, http_status=status)

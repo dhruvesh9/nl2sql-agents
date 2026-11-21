@@ -14,9 +14,10 @@ import logging
 from collections.abc import Callable
 from typing import Any
 
-from app import db_client, knowledge, pipeline, table_graph
+from app import db_client, deadline, knowledge, pipeline, table_graph
 from app.agents import query_analyzer, response_agent, sql_generator, table_classifier
 from app.config import settings
+from app.knowledge import KnowledgeServiceError
 from app.models import AskResponse, TraceEntry
 from app.step_trace import step
 
@@ -45,10 +46,27 @@ def _select_tables(
     return tables
 
 
-def _write_sql(
-    question: str, requirements: dict[str, Any], tables: list[str], trace: list[TraceEntry]
-) -> str:
-    """Step 3 (live schema from db-service) and step 5 (SQL Generator). Return the SQL."""
+def _load_runbooks(names: list[str]) -> tuple[list[str], list[str]]:
+    """Return (texts, missing). A runbook that knowledge-service does not have is skipped.
+
+    The index can list a runbook whose file is gone. The answer is then less exact, but still
+    useful, and a missing business rule is better than no answer. The warning tells you to fix it.
+    Any other error (service down) still stops the request.
+    """
+    texts, missing = [], []
+    for name in names:
+        try:
+            texts.append(knowledge.read_runbook(name))
+        except KnowledgeServiceError as error:
+            if error.status_code != 404:
+                raise
+            logger.warning("runbook missing, skipped", extra={"runbook": name})
+            missing.append(name)
+    return texts, missing
+
+
+def _read_schema(tables: list[str], trace: list[TraceEntry]) -> dict[str, Any]:
+    """Step 3: read the live schema of the chosen tables from db-service."""
     with step(
         trace, "3", "schema_discovery", "tool", tables=tables, fk_depth=settings.fk_depth
     ) as out:
@@ -56,18 +74,30 @@ def _write_sql(
         found = [table["name"] for table in schema["tables"]]
         out["summary"] = f"tables={len(found)}"
         out["output"] = {"tables": found, "not_found": schema.get("not_found", [])}
+        if not found:
+            # The table graph is older than the database (a table was dropped or renamed).
+            logger.warning("no chosen table exists", extra={"tables": tables})
+    return schema
 
+
+def _write_sql(
+    question: str, requirements: dict[str, Any], schema: dict[str, Any], trace: list[TraceEntry]
+) -> str:
+    """Step 5: the SQL Generator writes the SQL from the live schema. Return the SQL."""
     names = requirements.get("runbook_candidates") or []
     with step(trace, "5", "sql_generator", "agent", question=question, runbooks=names) as out:
         # Load the runbook text only now and only for the names step 1 found: fewer tokens.
-        runbook_texts = [knowledge.read_runbook(name) for name in names]
+        runbook_texts, missing = _load_runbooks(names)
         schema_text = pipeline.schema_to_text(schema)
         generated = sql_generator.run(requirements, schema_text, runbook_texts, schema["dialect"])
         out["summary"] = f"runbooks={names}; {generated['explanation']}"
+        if missing:
+            out["summary"] += f"; runbooks missing: {missing}"
         out["output"] = {
             "sql": generated["sql"],
             "explanation": generated["explanation"],
             "schema_chars": len(schema_text),
+            "runbooks_missing": missing,
         }
     return generated["sql"]
 
@@ -111,7 +141,15 @@ def _run(question: str, trace: list[TraceEntry], request_id: str) -> AskResponse
             lambda: response_agent.for_message("no_matching_data", question, request_id, trace),
         )
 
-    sql = _write_sql(question, requirements, tables, trace)
+    schema = _read_schema(tables, trace)
+    if not schema["tables"]:
+        # Nothing to write SQL for. Without this check the generator would invent table names.
+        return _respond(
+            trace,
+            lambda: response_agent.for_message("no_matching_data", question, request_id, trace),
+        )
+
+    sql = _write_sql(question, requirements, schema, trace)
     result = _run_query(sql, trace)
     return _respond(
         trace, lambda: response_agent.for_rows(result, sql, question, request_id, trace)
@@ -120,7 +158,8 @@ def _run(question: str, trace: list[TraceEntry], request_id: str) -> AskResponse
 
 def _respond(trace: list[TraceEntry], build: Callable[[], AskResponse]) -> AskResponse:
     """Step 8: the Response Agent builds the client response. It is a step like the others."""
-    with step(trace, "8", "response_agent", "agent") as out:
+    # No deadline check here: this step writes the "too slow" answer, so it must always run.
+    with step(trace, "8", "response_agent", "agent", check_deadline=False) as out:
         response = build()
         out["summary"] = _describe(response)
         out["output"] = {"has_data": response.data is not None, "code": response.code}
@@ -144,6 +183,7 @@ def _fail(error: Exception, trace: list[TraceEntry], request_id: str) -> AskResp
 def run_quick(question: str, request_id: str = "") -> AskResponse:
     """Analyze the question, pick the tables, write the SQL, run it once, and build the response."""
     trace: list[TraceEntry] = []
+    deadline.start()  # the time budget of this request (REQUEST_TIMEOUT_SECONDS)
     logger.info("ask-quick start", extra={"question": question})
     try:
         return _run(question, trace, request_id)

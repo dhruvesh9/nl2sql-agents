@@ -43,7 +43,10 @@ class FakeTogether:
     last_request: ClassVar[dict[str, Any]] = {}
     chunks: ClassVar[list[SimpleNamespace]] = []
 
-    def __init__(self, api_key: str) -> None:
+    client_options: ClassVar[dict[str, Any]] = {}
+
+    def __init__(self, api_key: str, **options: Any) -> None:
+        FakeTogether.client_options = options
         self.chat = SimpleNamespace(completions=SimpleNamespace(create=self.create))
 
     def create(self, **kwargs: Any):
@@ -194,12 +197,33 @@ def provider_error(
     ],
 )
 def test_a_provider_failure_becomes_an_llm_error_with_a_kind(
-    together: type[FakeTogether], failure: Exception, kind: str
+    together: type[FakeTogether], monkeypatch: pytest.MonkeyPatch, failure: Exception, kind: str
 ) -> None:
     def broken(**kwargs: Any) -> None:
         raise failure
 
-    together.create = staticmethod(broken)  # type: ignore[method-assign]
+    monkeypatch.setattr(together, "create", staticmethod(broken))
     with pytest.raises(LlmError) as error:
         llm.call_llm("s", "u")
     assert error.value.kind == kind
+
+
+def test_the_client_gets_the_timeout_and_the_retry_count_from_the_settings(
+    together: type[FakeTogether], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(settings, "llm_timeout_seconds", 12.5)
+    monkeypatch.setattr(settings, "llm_max_retries", 4)
+    llm.call_llm("s", "u")
+    assert together.client_options == {"timeout": 12.5, "max_retries": 4}
+
+
+def test_a_slow_llm_is_a_timeout_and_not_just_unavailable(
+    together: type[FakeTogether], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def too_slow(**kwargs: Any) -> None:
+        raise together_sdk.APITimeoutError(request=httpx.Request("POST", "https://api.example.com"))
+
+    monkeypatch.setattr(together, "create", staticmethod(too_slow))
+    with pytest.raises(LlmError) as error:
+        llm.call_llm("s", "u")
+    assert error.value.kind == "timeout"

@@ -145,3 +145,13 @@ def test_generate_returns_502_when_db_service_is_down(
     response = client.post("/generate")
     assert response.status_code == 502
     assert not (kb / "graph.json").exists()  # a failed run never leaves a broken file
+
+
+def test_generate_returns_504_when_db_service_is_too_slow(
+    client: TestClient, kb, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def slow(*args: Any, **kwargs: Any) -> None:
+        raise httpx.ReadTimeout("took too long")
+
+    monkeypatch.setattr(httpx, "get", slow)
+    assert client.post("/generate").status_code == 504

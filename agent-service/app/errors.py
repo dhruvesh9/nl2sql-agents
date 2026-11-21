@@ -10,7 +10,8 @@ class LlmError(Exception):
     """An LLM call failed. kind tells the reason, and detail is for the logs only.
 
     kind is one of:
-        "unavailable": timeout, no connection, a 5xx answer, or a bad API key.
+        "unavailable": no connection, a 5xx answer, or a bad API key.
+        "timeout": the call took longer than LLM_TIMEOUT_SECONDS (after the retries).
         "rate_limited": the provider said "too many requests" (429).
         "bad_output": the answer is not usable (not JSON, or a key is missing), even after a retry.
     """

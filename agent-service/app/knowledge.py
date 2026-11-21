@@ -42,7 +42,9 @@ def _fetch(path: str) -> Any:
             headers={REQUEST_ID_HEADER: current_request_id()},
         )
     except httpx.HTTPError as error:
-        raise KnowledgeServiceError(503, f"cannot reach knowledge-service: {error}") from error
+        # 504 for a slow answer, 503 for no answer. The Response Agent shows them differently.
+        status = 504 if isinstance(error, httpx.TimeoutException) else 503
+        raise KnowledgeServiceError(status, f"cannot reach knowledge-service: {error}") from error
     logger.info(
         "knowledge_service call",
         extra={

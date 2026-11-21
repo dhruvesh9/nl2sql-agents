@@ -6,9 +6,9 @@ The dialect-specific EXPLAIN SQL lives in this file only.
 
 from sqlalchemy.exc import DBAPIError
 
-from app.database import engine, error_message, get_dialect, sql_to_text, start_readonly
+from app.database import classify_error, engine, get_dialect, sql_to_text, start_readonly
 from app.models import PlanResponse
-from app.sql_guard import check_sql
+from app.sql_guard import SqlRejectedError, check_sql
 
 
 def build_explain_statement(sql: str, dialect: str) -> str:
@@ -39,7 +39,10 @@ def get_plan(sql: str) -> PlanResponse:
             start_readonly(conn)
             result = conn.execute(sql_to_text(explain_sql)).scalar()
     except DBAPIError as error:
-        return PlanResponse(valid=False, error=error_message(error))
+        problem = classify_error(error)
+        if isinstance(problem, SqlRejectedError):
+            return PlanResponse(valid=False, error=str(problem))  # the SQL is wrong: say why
+        raise problem from error  # a timeout or a lost connection is not a plan answer
 
     # PostgreSQL returns a list with one item. The item has the key "Plan".
     plan = result[0]["Plan"]

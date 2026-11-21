@@ -35,7 +35,24 @@ def handle_bad_name(request: Request, exc: ValueError) -> JSONResponse:
 @app.exception_handler(httpx.HTTPError)
 def handle_db_service_error(request: Request, exc: httpx.HTTPError) -> JSONResponse:
     # POST /generate needs db-service. When db-service fails, the answer is "bad gateway".
-    return JSONResponse(status_code=502, content={"detail": f"db-service failed: {exc}"})
+    # When it is too slow, the answer is "gateway timeout".
+    status = 504 if isinstance(exc, httpx.TimeoutException) else 502
+    return JSONResponse(status_code=status, content={"detail": f"db-service failed: {exc}"})
+
+
+@app.exception_handler(Exception)
+def handle_unexpected(request: Request, exc: Exception) -> JSONResponse:
+    """Any other error (for example a damaged graph.json): a JSON body, like every other error.
+
+    uvicorn logs the stack trace. The client gets no details.
+    """
+    return JSONResponse(
+        status_code=500,
+        content={
+            "detail": "Internal server error",
+            "request_id": observability.current_request_id(),
+        },
+    )
 
 
 @app.get("/health")

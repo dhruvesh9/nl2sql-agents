@@ -146,3 +146,23 @@ def test_the_request_id_goes_to_knowledge_service_in_the_header(
     observability.request_id_var.set("abc12345def")
     knowledge.read_index()
     assert service.headers == {"X-Request-ID": "abc12345def"}
+
+
+def test_a_slow_knowledge_service_is_a_504_and_a_missing_one_is_a_503(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def raises(error: Exception):
+        def get(url: str, **kwargs):
+            raise error
+
+        return get
+
+    monkeypatch.setattr(httpx, "get", raises(httpx.ReadTimeout("too slow")))
+    with pytest.raises(knowledge.KnowledgeServiceError) as slow:
+        knowledge.read_index()
+    assert slow.value.status_code == 504
+
+    monkeypatch.setattr(httpx, "get", raises(httpx.ConnectError("refused")))
+    with pytest.raises(knowledge.KnowledgeServiceError) as down:
+        knowledge.read_index()
+    assert down.value.status_code == 503

@@ -85,3 +85,14 @@ The database tests skip when PostgreSQL is not running.
 Every request has a request ID (the `X-Request-ID` header, or a new one). It is in every log line and in the
 response header. Logs are JSON, one object per line (`LOG_FORMAT=text` for a terminal). Each request writes one
 `request` line with the method, path, status, and `duration_ms`.
+
+## Errors
+
+Each database failure has its own status, so the agent can react in the right way:
+
+| Status | Meaning |
+|---|---|
+| 400 | The SQL is not allowed or the database rejects it (wrong column, syntax). `detail` says why. |
+| 504 | The query was valid but ran longer than `STATEMENT_TIMEOUT_MS`. The agent must not "fix" the SQL. |
+| 503 | The database cannot be reached, is out of connections, or the connection pool is full. |
+| 500 | A bug. The body is `{"detail": "Internal server error", "request_id": "..."}`. |

@@ -2,11 +2,13 @@
 
 from typing import Any
 
+import httpx
 import pytest
 
-from app import db_client, knowledge, quick_pipeline
+from app import db_client, deadline, knowledge, quick_pipeline
 from app.agents import query_analyzer, response_agent, sql_generator, table_classifier
 from app.errors import LlmError
+from app.knowledge import KnowledgeServiceError
 
 GRAPH = {
     "nodes": [{"id": "orders", "description": "Purchase orders."}],
@@ -36,6 +38,7 @@ class Fakes:
         self.intent = "list"
         self.tables = ["orders"]
         self.query_error: str | None = None
+        self.query_status = 400
         self.received: dict[str, Any] = {}
         monkeypatch.setattr(knowledge, "read_index", lambda: "INDEX")
         monkeypatch.setattr(knowledge, "read_graph", lambda: GRAPH)
@@ -68,7 +71,7 @@ class Fakes:
 
     def run_query(self, sql: str) -> dict[str, Any]:
         if self.query_error:
-            raise db_client.DbServiceError(400, self.query_error)
+            raise db_client.DbServiceError(self.query_status, self.query_error)
         return {"columns": ["id"], "rows": [[1], [2]], "row_count": 2}
 
 
@@ -149,3 +152,107 @@ def test_the_client_gets_only_the_answer_the_rows_and_the_ids(fakes: Fakes) -> N
     body = response.model_dump(exclude_none=True)
     assert set(body) == {"answer", "data", "request_id"}
     assert set(body["data"]) == {"columns", "rows", "truncated"}
+
+
+# ---- Edge cases: each one is a failure that we make on purpose ("failure injection") ----
+
+
+def test_a_slow_query_becomes_a_timeout_answer(fakes: Fakes) -> None:
+    fakes.query_error = "The query took too long and was stopped."
+    fakes.query_status = 504
+    response = quick_pipeline.run_quick("q")
+    assert (response.code, response.http_status) == ("TIMEOUT", 504)
+    assert response.data is None
+
+
+def test_db_service_down_becomes_service_unavailable(
+    fakes: Fakes, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def down(*args: Any, **kwargs: Any) -> None:
+        raise db_client.DbServiceError(503, "The database is not available.")
+
+    monkeypatch.setattr(db_client, "get_schema", down)
+    response = quick_pipeline.run_quick("q")
+    assert (response.code, response.http_status) == ("SERVICE_UNAVAILABLE", 503)
+
+
+def test_a_connection_that_times_out_becomes_a_timeout_answer(
+    fakes: Fakes, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def slow(*args: Any, **kwargs: Any) -> None:
+        raise httpx.ReadTimeout("no answer in time")
+
+    monkeypatch.setattr(db_client, "run_query", slow)
+    assert quick_pipeline.run_quick("q").code == "TIMEOUT"
+
+
+def test_a_slow_llm_becomes_a_timeout_answer(fakes: Fakes, monkeypatch: pytest.MonkeyPatch) -> None:
+    def slow(*args: Any, **kwargs: Any) -> None:
+        raise LlmError("timeout", "APITimeoutError")
+
+    monkeypatch.setattr(sql_generator, "run", slow)
+    response = quick_pipeline.run_quick("q")
+    assert response.code == "TIMEOUT"
+    assert [e.step for e in response.trace] == ["1", "2", "3", "5", "8"]
+
+
+def test_a_missing_runbook_is_skipped_and_the_answer_still_comes(
+    fakes: Fakes, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def missing(name: str) -> str:
+        raise KnowledgeServiceError(404, f"Unknown runbook: {name}")
+
+    monkeypatch.setattr(knowledge, "read_runbook", missing)
+    response = quick_pipeline.run_quick("q")
+    assert response.data.rows == [[1], [2]]
+    assert fakes.received["runbook_texts"] == []
+    step_5 = next(e for e in response.trace if e.step == "5")
+    assert "runbooks missing: ['rb']" in step_5.summary
+
+
+def test_knowledge_service_down_while_loading_a_runbook_still_stops_the_request(
+    fakes: Fakes, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def down(name: str) -> str:
+        raise KnowledgeServiceError(503, "cannot reach knowledge-service")
+
+    monkeypatch.setattr(knowledge, "read_runbook", down)
+    assert quick_pipeline.run_quick("q").code == "SERVICE_UNAVAILABLE"
+
+
+def test_a_graph_that_is_not_generated_yet_is_service_unavailable(
+    fakes: Fakes, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def no_graph() -> None:
+        raise KnowledgeServiceError(404, "graph.json not found. Run POST /generate first.")
+
+    monkeypatch.setattr(knowledge, "read_graph", no_graph)
+    assert quick_pipeline.run_quick("q").code == "SERVICE_UNAVAILABLE"
+
+
+def test_chosen_tables_that_do_not_exist_give_a_no_data_text_and_no_invented_sql(
+    fakes: Fakes, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # The graph is older than the database: db-service knows none of the chosen tables.
+    empty = {"dialect": "postgresql", "tables": [], "not_found": ["orders"]}
+    monkeypatch.setattr(db_client, "get_schema", lambda tables, fk_depth: empty)
+    response = quick_pipeline.run_quick("q")
+    assert response.answer == "A friendly reply."
+    assert response.data is None
+    assert "schema_text" not in fakes.received  # the SQL generator never ran
+
+
+def test_when_the_time_budget_is_used_the_next_step_does_not_start_and_the_answer_says_so(
+    fakes: Fakes, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    original = table_classifier.run
+
+    def slow_classifier(*args: Any, **kwargs: Any) -> dict[str, Any]:
+        deadline.start(-1)  # as if this step took longer than the whole budget
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(table_classifier, "run", slow_classifier)
+    response = quick_pipeline.run_quick("q")
+    assert (response.code, response.http_status) == ("TIMEOUT", 504)
+    assert "schema_text" not in fakes.received  # no more LLM calls after the budget
+    assert [e.step for e in response.trace][-1] == "8"  # the answer step still ran

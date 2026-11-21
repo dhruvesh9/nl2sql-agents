@@ -8,10 +8,17 @@ import logging
 
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
+from sqlalchemy.exc import DBAPIError
+from sqlalchemy.exc import TimeoutError as PoolTimeoutError
 
 from app import executor, observability, planner, schema_reader
 from app.config import settings
-from app.database import check_connection
+from app.database import (
+    DatabaseUnavailableError,
+    QueryTimeoutError,
+    check_connection,
+    classify_error,
+)
 from app.models import (
     CatalogResponse,
     PlanRequest,
@@ -42,6 +49,49 @@ def handle_sql_rejected(request: Request, exc: SqlRejectedError) -> JSONResponse
     # A rejected SQL is normal here (the agent sent a bad query). The reason helps to find the cause.
     logger.warning("sql rejected", extra={"reason": str(exc)})
     return JSONResponse(status_code=400, content={"detail": str(exc)})
+
+
+@app.exception_handler(QueryTimeoutError)
+def handle_query_timeout(request: Request, exc: QueryTimeoutError) -> JSONResponse:
+    # The query was valid but too slow. 504 tells the agent "do not fix the SQL, make it lighter".
+    logger.warning("query timeout", extra={"timeout_ms": settings.statement_timeout_ms})
+    return JSONResponse(status_code=504, content={"detail": str(exc)})
+
+
+@app.exception_handler(DatabaseUnavailableError)
+def handle_database_unavailable(request: Request, exc: DatabaseUnavailableError) -> JSONResponse:
+    logger.error("database unavailable")
+    return JSONResponse(status_code=503, content={"detail": str(exc)})
+
+
+@app.exception_handler(PoolTimeoutError)
+def handle_pool_timeout(request: Request, exc: PoolTimeoutError) -> JSONResponse:
+    # All connections of the pool are busy. The caller can try again in a moment.
+    logger.error("connection pool is exhausted")
+    return JSONResponse(status_code=503, content={"detail": "The database is busy."})
+
+
+@app.exception_handler(DBAPIError)
+def handle_database_error(request: Request, exc: DBAPIError) -> JSONResponse:
+    # A database error outside /query and /plan (for example in /schema or /catalog).
+    problem = classify_error(exc)
+    if isinstance(problem, QueryTimeoutError):
+        return handle_query_timeout(request, problem)
+    if isinstance(problem, DatabaseUnavailableError):
+        return handle_database_unavailable(request, problem)
+    return handle_unexpected(request, exc)
+
+
+@app.exception_handler(Exception)
+def handle_unexpected(request: Request, exc: Exception) -> JSONResponse:
+    """Any other error: a JSON body, like every other error. uvicorn logs the stack trace."""
+    return JSONResponse(
+        status_code=500,
+        content={
+            "detail": "Internal server error",
+            "request_id": observability.current_request_id(),
+        },
+    )
 
 
 @app.get("/health")

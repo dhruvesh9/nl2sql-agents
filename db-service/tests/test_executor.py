@@ -93,8 +93,9 @@ def test_wrong_sql_returns_400_with_database_message() -> None:
 @requires_db
 def test_slow_query_stops_at_the_timeout() -> None:
     response = post_query(f"SELECT pg_sleep({settings.statement_timeout_ms / 1000 + 5})")
-    assert response.status_code == 400
-    assert "timeout" in response.json()["detail"]
+    # 504, not 400: the SQL is valid but slow, so the agent must not try to "fix" it.
+    assert response.status_code == 504
+    assert "too long" in response.json()["detail"]
 
 
 @requires_db

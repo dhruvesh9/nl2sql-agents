@@ -12,6 +12,7 @@ from typing import Any
 from fastapi import FastAPI, Request, Response
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
+from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from app import knowledge, observability, pipeline, quick_pipeline, tracing, versioning
 from app.agents import response_agent
@@ -49,6 +50,14 @@ def _error_json(response: AskResponse) -> JSONResponse:
 @app.exception_handler(RequestValidationError)
 def handle_invalid_request(request: Request, exc: RequestValidationError) -> JSONResponse:
     return _error_json(response_agent.for_invalid_request(observability.current_request_id()))
+
+
+@app.exception_handler(StarletteHTTPException)
+def handle_http_error(request: Request, exc: StarletteHTTPException) -> JSONResponse:
+    # An unknown path (404) or a wrong method (405). Without this the client gets FastAPI's own shape.
+    return _error_json(
+        response_agent.for_http_error(exc.status_code, observability.current_request_id())
+    )
 
 
 @app.exception_handler(NotImplementedError)

@@ -15,9 +15,9 @@ from uuid import UUID
 from sqlalchemy.exc import DBAPIError
 
 from app.config import settings
-from app.database import engine, error_message, get_dialect, sql_to_text, start_readonly
+from app.database import classify_error, engine, get_dialect, sql_to_text, start_readonly
 from app.models import QueryResponse
-from app.sql_guard import SqlRejectedError, check_sql
+from app.sql_guard import check_sql
 
 logger = logging.getLogger(__name__)
 
@@ -68,8 +68,8 @@ def run_query(sql: str, max_rows: int | None) -> QueryResponse:
             columns = list(result.keys())
             fetched = result.fetchmany(limit + 1)
     except DBAPIError as error:
-        # Wrong SQL and timeouts end here. The agent needs the message to fix its SQL.
-        raise SqlRejectedError(error_message(error)) from error
+        # Wrong SQL, a timeout, and a lost connection end here. Each one gets its own error.
+        raise classify_error(error) from error
     elapsed_ms = int((time.perf_counter() - start) * 1000)
 
     truncated = len(fetched) > limit

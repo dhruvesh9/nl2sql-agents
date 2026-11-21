@@ -66,3 +66,26 @@ def test_an_answer_with_rows_leaves_out_the_empty_fields(monkeypatch: pytest.Mon
         "answer": "Here is the result (1 row).",
         "data": {"columns": ["a"], "rows": [[1]], "truncated": False},
     }
+
+
+def test_an_unknown_path_has_the_error_shape_and_a_request_id() -> None:
+    response = client.get("/nothing-here")
+    assert response.status_code == 404
+    body = response.json()
+    assert body["code"] == "NOT_FOUND"
+    assert body["request_id"] == response.headers["X-Request-ID"]
+    assert "detail" not in body
+
+
+def test_a_wrong_method_has_the_error_shape() -> None:
+    response = client.get("/ask-quick")
+    assert response.status_code == 405
+    assert response.json()["code"] == "METHOD_NOT_ALLOWED"
+
+
+def test_a_body_that_is_not_json_is_422_in_the_error_shape() -> None:
+    response = client.post(
+        "/ask-quick", content=b"this is not json", headers={"content-type": "application/json"}
+    )
+    assert response.status_code == 422
+    assert response.json()["code"] == "INVALID_REQUEST"

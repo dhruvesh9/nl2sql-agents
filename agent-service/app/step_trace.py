@@ -18,6 +18,7 @@ from collections.abc import Iterator
 from contextlib import contextmanager
 from typing import Any
 
+from app import deadline
 from app.models import TraceEntry
 from app.tracing import observe
 
@@ -26,16 +27,26 @@ logger = logging.getLogger(__name__)
 
 @contextmanager
 def step(
-    trace: list[TraceEntry], step_id: str, name: str, kind: str = "span", **input: Any
+    trace: list[TraceEntry],
+    step_id: str,
+    name: str,
+    kind: str = "span",
+    check_deadline: bool = True,
+    **input: Any,
 ) -> Iterator[dict[str, Any]]:
     """Run one step. kind is the Langfuse type: "agent" (LLM), "tool" (code or service), "retriever".
 
+    Before it starts, the step checks the time budget of the request (app/deadline.py). The last step,
+    which builds the answer, sets check_deadline=False: it must run even when the time is used,
+    because it writes the "too slow" answer.
     The input keyword arguments are shown on the Langfuse span. Never pass result rows.
     """
     result: dict[str, Any] = {"summary": "", "output": None}
     start = time.perf_counter()
     failed = False
     try:
+        if check_deadline:
+            deadline.check(f"{step_id} {name}")
         with observe(f"{step_id}_{name}", as_type=kind, input=input or None) as observation:
             yield result
             observation.update(output=result["output"], metadata={"summary": result["summary"]})

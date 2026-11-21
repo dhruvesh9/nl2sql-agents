@@ -9,7 +9,7 @@ import time
 from json import loads
 from typing import Any
 
-from together import RateLimitError, Together, TogetherError
+from together import APITimeoutError, RateLimitError, Together, TogetherError
 
 from app.config import LlmParams, settings
 from app.errors import LlmError
@@ -49,7 +49,11 @@ def call_llm(system_prompt: str, user_message: str, agent: str = "default") -> s
     """
     options = options_for(agent)
     # The client is created here so that a missing key does not stop the app from starting.
-    client = Together(api_key=settings.together_api_key)
+    client = Together(
+        api_key=settings.together_api_key,
+        timeout=settings.llm_timeout_seconds,
+        max_retries=settings.llm_max_retries,
+    )
     messages = [
         {"role": "system", "content": system_prompt},
         {"role": "user", "content": user_message},
@@ -93,8 +97,12 @@ def call_llm(system_prompt: str, user_message: str, agent: str = "default") -> s
         except RateLimitError as error:
             _log_failure(agent, options["model"], "rate_limited", start, error)
             raise LlmError("rate_limited", str(error)) from error
+        except APITimeoutError as error:
+            # A slow answer is not the same as "not available": the user can try a simpler question.
+            _log_failure(agent, options["model"], "timeout", start, error)
+            raise LlmError("timeout", str(error)) from error
         except TogetherError as error:
-            # Timeout, no connection, 5xx, bad key: for the user these are all "not available".
+            # No connection, 5xx, bad key: for the user these are all "not available".
             _log_failure(agent, options["model"], "unavailable", start, error)
             raise LlmError("unavailable", f"{type(error).__name__}: {error}") from error
         text = "".join(parts)
