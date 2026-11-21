@@ -21,16 +21,22 @@ curl -s -X POST localhost:8000/ask-quick -H 'Content-Type: application/json' \
 
 ```json
 {
-  "status": "success",
-  "sql": "SELECT a.city, SUM(r.amount) AS total_refund_amount FROM refunds r JOIN payments p ON r.payment_id = p.id JOIN invoices i ON p.invoice_id = i.id JOIN accounts acc ON i.account_id = acc.id JOIN customers c ON acc.customer_id = c.id JOIN addresses a ON c.billing_address_id = a.id GROUP BY a.city",
-  "columns": ["city", "total_refund_amount"],
-  "rows": [["Leeds", 130.0], ["London", 125.0], ["Glasgow", 160.0]],
-  "failure_reason": null
+  "answer": "Here are the results (3 rows).",
+  "data": {
+    "columns": ["city", "total_refund_amount"],
+    "rows": [["Leeds", 130.0], ["London", 125.0], ["Glasgow", 160.0]],
+    "truncated": false
+  },
+  "request_id": "15156728e806"
 }
 ```
 
+The response always has an `answer` text. `data` is there only when the query returned rows. It always has the same
+fields (`columns`, `rows`, `truncated`), so a UI can show it as a table or a chart. A single value comes back as a sentence, for example
+"There are 20 customers living in London." The SQL and the step details are not in the response.
+They go to the agent-service log and to Langfuse.
+
 A greeting such as "hello" stops after agent 1. It needs no tables, so it costs one LLM call.
-The step details (time and summary of each step) go to the agent-service log and to Langfuse.
 `POST /ask` is the full flow with the feedback loops. It is not implemented yet.
 
 ## Architecture

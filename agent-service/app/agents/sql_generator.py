@@ -8,6 +8,7 @@ import re
 from pathlib import Path
 from typing import Any
 
+from app.errors import LlmError
 from app.llm import call_llm_json
 
 PROMPT_FILE = Path(__file__).parent.parent / "prompts" / "sql_generator.md"
@@ -52,5 +53,5 @@ def run(
 
     sql = result.get("sql")
     if not isinstance(sql, str) or not _clean_sql(sql):
-        raise ValueError("sql_generator: the LLM did not return a 'sql' text")
+        raise LlmError("bad_output", "sql_generator: the LLM did not return a 'sql' text")
     return {"sql": _clean_sql(sql), "explanation": str(result.get("explanation", ""))}

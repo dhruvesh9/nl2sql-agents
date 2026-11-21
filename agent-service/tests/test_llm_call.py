@@ -3,12 +3,22 @@
 from types import SimpleNamespace
 from typing import Any, ClassVar
 
+import httpx
 import pytest
+import together as together_sdk
 
 from app import llm
 from app.config import LlmParams, Settings, settings
+from app.errors import LlmError
 
-AGENTS = ("query_analyzer", "table_classifier", "table_feedback", "sql_generator", "sql_validator")
+AGENTS = (
+    "query_analyzer",
+    "table_classifier",
+    "table_feedback",
+    "sql_generator",
+    "sql_validator",
+    "response_agent",
+)
 
 
 @pytest.fixture(autouse=True)
@@ -160,3 +170,36 @@ def test_agent_options_can_be_set_with_environment_variables(
     assert fresh.table_classifier.top_k == 40
     assert fresh.query_analyzer.reasoning_enabled is False
     assert fresh.sql_generator.reasoning_enabled is None  # not set: the default is used
+
+
+def provider_error(
+    error_class: type[together_sdk.TogetherError], status: int
+) -> together_sdk.TogetherError:
+    response = httpx.Response(status, request=httpx.Request("POST", "https://api.example.com"))
+    return error_class("provider said no", response=response, body=None)
+
+
+@pytest.mark.parametrize(
+    ("failure", "kind"),
+    [
+        (provider_error(together_sdk.RateLimitError, 429), "rate_limited"),
+        (provider_error(together_sdk.InternalServerError, 500), "unavailable"),
+        (provider_error(together_sdk.AuthenticationError, 401), "unavailable"),
+        (
+            together_sdk.APIConnectionError(
+                request=httpx.Request("POST", "https://api.example.com")
+            ),
+            "unavailable",
+        ),
+    ],
+)
+def test_a_provider_failure_becomes_an_llm_error_with_a_kind(
+    together: type[FakeTogether], failure: Exception, kind: str
+) -> None:
+    def broken(**kwargs: Any) -> None:
+        raise failure
+
+    together.create = staticmethod(broken)  # type: ignore[method-assign]
+    with pytest.raises(LlmError) as error:
+        llm.call_llm("s", "u")
+    assert error.value.kind == kind

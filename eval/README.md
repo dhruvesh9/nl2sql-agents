@@ -24,6 +24,9 @@ make eval ARGS="--endpoint ask"              # level 3 against POST /ask (when i
 make eval ARGS="--split test"                # the held-out split. Use it to report, not to tune.
 make eval ARGS="--baseline eval/results/run_X/summary.json --max-drop 5"   # exit 1 if a number fell
 ```
+Level 3 reads `answer` and `data` from the client response. `data` (`columns`, `rows`, `truncated`) is there only when the query gave rows. That response has no SQL, so the level 3
+details have no SQL. Level 2 keeps the generated SQL for debugging.
+
 It uses the agent-service venv, because levels 1 and 2 call the agent code directly (no HTTP, so the
 client response can stay small). Level 3 uses HTTP, like a real client. `AGENT_URL` changes the URL.
 

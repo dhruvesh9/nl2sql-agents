@@ -5,6 +5,7 @@ from typing import Any
 import pytest
 
 from app.agents import sql_generator
+from app.errors import LlmError
 
 
 def test_sql_generator_cleans_fence_and_semicolon(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -31,5 +32,5 @@ def test_sql_generator_sends_runbooks_and_feedback(monkeypatch: pytest.MonkeyPat
 
 def test_sql_generator_rejects_missing_sql(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(sql_generator, "call_llm_json", lambda *a, **k: {"explanation": "e"})
-    with pytest.raises(ValueError):
+    with pytest.raises(LlmError):
         sql_generator.run({}, "schema", [], "postgresql")

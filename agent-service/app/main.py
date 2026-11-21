@@ -5,17 +5,18 @@ Pipeline step: infrastructure. Each request opens one Langfuse trace.
 """
 
 import logging
+import uuid
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from typing import Any
 
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, Request, Response
+from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 
 from app import knowledge, pipeline, quick_pipeline
+from app.agents import response_agent
 from app.config import settings
-from app.db_client import DbServiceError
-from app.knowledge import KnowledgeServiceError
 from app.models import AskRequest, AskResponse
 from app.tracing import init_tracing, observe, shutdown_tracing
 
@@ -37,29 +38,46 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 app = FastAPI(title="agent-service", lifespan=lifespan)
 
 
+def new_request_id() -> str:
+    """A short id for one request. The client gets it back, and the logs show it."""
+    return uuid.uuid4().hex[:12]
+
+
+def _error_json(response: AskResponse) -> JSONResponse:
+    return JSONResponse(
+        status_code=response.http_status, content=response.model_dump(exclude_none=True)
+    )
+
+
+# Every error leaves the service in the same shape: {"type": "error", "data": ..., "code": ...}.
+# The client never gets FastAPI's default {"detail": ...} and never gets a stack trace.
+@app.exception_handler(RequestValidationError)
+def handle_invalid_request(request: Request, exc: RequestValidationError) -> JSONResponse:
+    return _error_json(response_agent.for_invalid_request(new_request_id()))
+
+
 @app.exception_handler(NotImplementedError)
-def handle_not_implemented(request: Request, exc: NotImplementedError) -> JSONResponse:
-    # A stub raises this error. The message names the task file to read.
-    return JSONResponse(status_code=501, content={"detail": str(exc)})
-
-
-@app.exception_handler(KnowledgeServiceError)
-def handle_knowledge_error(request: Request, exc: KnowledgeServiceError) -> JSONResponse:
-    # knowledge-service is another service. When it fails, the answer is "bad gateway".
-    return JSONResponse(status_code=502, content={"detail": str(exc)})
+@app.exception_handler(Exception)
+def handle_any_error(request: Request, exc: Exception) -> JSONResponse:
+    # A stub raises NotImplementedError. Any other error that no pipeline caught ends up here too.
+    return _error_json(response_agent.for_error(exc, new_request_id()))
 
 
 def _trace_output(response: AskResponse) -> dict[str, Any]:
-    """The debug data for Langfuse: the result AND the steps. The client gets no steps."""
+    """The debug data for Langfuse: the outcome AND the steps. The client gets no steps.
+
+    Only the number of rows is sent, not the rows: they can hold personal data.
+    """
     steps = [entry.model_dump() for entry in response.trace]
     for step in steps:
         logger.info(
             "step %(step)s %(name)s attempt=%(attempt)d %(elapsed_ms)d ms: %(summary)s", step
         )
     return {
-        "status": response.status,
+        "code": response.code,
+        "rows": len(response.data.rows) if response.data else 0,
         "sql": response.sql,
-        "failure_reason": response.failure_reason,
+        "request_id": response.request_id,
         "steps": steps,
     }
 
@@ -69,7 +87,7 @@ def health() -> dict[str, str]:
     return {"status": "ok"}
 
 
-@app.post("/ask", response_model=AskResponse)
+@app.post("/ask", response_model=AskResponse, response_model_exclude_none=True)
 def ask(request: AskRequest) -> AskResponse:
     """The full pipeline with Loop A and Loop B. See app/pipeline.py. Not implemented yet (501)."""
     # One trace per request. LLM calls inside the pipeline become children of this trace.
@@ -79,15 +97,15 @@ def ask(request: AskRequest) -> AskResponse:
     return response
 
 
-@app.post("/ask-quick", response_model=AskResponse)
-def ask_quick(request: AskRequest) -> AskResponse:
-    """Steps 1, 2, 3, 5, 7 with no feedback loops (no steps 4 and 6). See app/quick_pipeline.py."""
-    try:
-        with observe("ask-quick", input={"question": request.question}) as trace:
-            response = quick_pipeline.run_quick(request.question)
-            trace.update(output=_trace_output(response))
-    except ValueError as error:  # the LLM did not return valid JSON, even after one retry
-        raise HTTPException(status_code=502, detail=str(error)) from error
-    except DbServiceError as error:  # db-service failed on /schema
-        raise HTTPException(status_code=502, detail=str(error)) from error
+@app.post("/ask-quick", response_model=AskResponse, response_model_exclude_none=True)
+def ask_quick(request: AskRequest, http_response: Response) -> AskResponse:
+    """Steps 1, 2, 3, 5, 7, 8 with no feedback loops. See app/quick_pipeline.py.
+
+    run_quick never raises: a failure becomes a response of type "error".
+    """
+    request_id = new_request_id()
+    with observe("ask-quick", input={"question": request.question}) as trace:
+        response = quick_pipeline.run_quick(request.question, request_id)
+        trace.update(output=_trace_output(response))
+    http_response.status_code = response.http_status
     return response

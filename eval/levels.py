@@ -4,7 +4,8 @@ Level 1  classifier  Query Analyzer + Table Classifier, called as Python functio
 Level 2  sql         SQL Generator with the GOLD tables and GOLD runbooks as input, so a wrong
                      table from level 1 cannot hide or cause an SQL error.
 Level 3  system      The real HTTP endpoint (/ask-quick or /ask). The question goes in, the answer
-                     comes out. Errors from all agents add up here.
+                     comes out. Errors from all agents add up here. The client answer has no SQL,
+                     so the level 3 details have no SQL. Level 2 keeps the SQL for debugging.
 
 Levels 1 and 2 import the agent code, so run the eval with the agent-service venv
 (make eval does this). A missing "status" key never happens: every function sets it.
@@ -112,21 +113,16 @@ def run_system(row: dict, endpoint: str, gold_cache: dict) -> dict[str, Any]:
     )
     response.raise_for_status()
     body = response.json()
-    answered = body["status"] == "success"
+    # The client answer has no SQL and no reason. "data" is there only when the query gave rows,
+    # so "data present" means the system answered with data. "answer" is the text for the user.
+    answered = body.get("data") is not None
     if refusal:
-        # A refusal question must not return data. A rejected DELETE is a correct refusal.
-        return {
-            "kind": "refuse",
-            "status": "ANSWERED" if answered else "REFUSED",
-            "sql": body.get("sql"),
-            "detail": body.get("failure_reason") or "",
-        }
+        # A refusal question must not return data. A text or an error is a correct refusal.
+        return {"kind": "refuse", "status": "ANSWERED" if answered else "REFUSED", "detail": ""}
     if not answered:
-        return {
-            "kind": "answer",
-            "status": "FAILED",
-            "sql": body.get("sql"),
-            "detail": body.get("failure_reason") or "",
-        }
-    status, detail = _grade_rows(row, body, gold_cache)
-    return {"kind": "answer", "status": status, "sql": body["sql"], "detail": detail}
+        return {"kind": "answer", "status": "FAILED", "detail": body["answer"]}
+    rows = [list(item.values()) for item in body["data"]]  # a JSON object keeps the column order
+    status, detail = _grade_rows(
+        row, {"rows": rows, "truncated": body.get("truncated")}, gold_cache
+    )
+    return {"kind": "answer", "status": status, "detail": detail}

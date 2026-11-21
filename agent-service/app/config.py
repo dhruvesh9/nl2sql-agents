@@ -35,12 +35,18 @@ class Settings(BaseSettings):
     table_feedback: LlmParams = LlmParams()
     sql_generator: LlmParams = LlmParams()
     sql_validator: LlmParams = LlmParams()
+    # The Response Agent writes short replies (greetings). Thinking would only add delay.
+    response_agent: LlmParams = LlmParams(reasoning_enabled=False)
     db_service_url: str = "http://localhost:8001"
     db_service_timeout_seconds: float = 30
     knowledge_service_url: str = "http://localhost:8002"
     knowledge_service_timeout_seconds: float = 10
     knowledge_cache_ttl_seconds: float = 300
     fk_depth: int = 1
+    max_question_chars: int = 1000
+    # True: the Response Agent LLM sees ONE result value, to write a sentence ("There are 20 ...").
+    # False: no data goes to the LLM, and the answer is a fixed "Customer count: 20".
+    response_llm_sees_values: bool = True
     max_table_attempts: int = 3
     max_sql_attempts: int = 3
     pass_score: int = 80

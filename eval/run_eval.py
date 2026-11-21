@@ -41,7 +41,12 @@ def grade(run: Callable[[], dict[str, Any]], row: dict, level: str, attempt: int
         result = {"status": "ERROR", "detail": f"{type(error).__name__}: {error}"}
     result["elapsed_ms"] = int((time.perf_counter() - start) * 1000)
     result["tokens"] = usage.read()["tokens"]
-    return {"id": row["id"], "category": row["category"], "level": level, "attempt": attempt} | result
+    return {
+        "id": row["id"],
+        "category": row["category"],
+        "level": level,
+        "attempt": attempt,
+    } | result
 
 
 def run_attempt(
@@ -60,7 +65,9 @@ def run_attempt(
             result = grade(runners[level], row, level, attempt)
             details.append(result)
             if result["status"] not in ("PASS", "WARN", "MATCH", "REFUSED", "SKIP"):
-                logger.info("%s %-10s %-9s %s", row["id"], level, result["status"], result["detail"])
+                logger.info(
+                    "%s %-10s %-9s %s", row["id"], level, result["status"], result["detail"]
+                )
     return details
 
 
@@ -83,8 +90,10 @@ def format_metric(value: dict) -> str:
 
 def print_summary(summary: dict) -> None:
     meta = summary["meta"]
-    print(f"\ncommit {meta['git_commit']}{'+dirty' if meta['git_dirty'] else ''}"
-          f"  prompts {meta['prompt_version']}  split {meta['split']}  repeat {meta['repeat']}")
+    print(
+        f"\ncommit {meta['git_commit']}{'+dirty' if meta['git_dirty'] else ''}"
+        f"  prompts {meta['prompt_version']}  split {meta['split']}  repeat {meta['repeat']}"
+    )
     for level, data in summary["levels"].items():
         print(f"\n== {level}: {data['questions']} questions, {data['skipped']} skipped")
         for name, value in data["metrics"].items():
@@ -105,7 +114,9 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--limit", type=int, default=None, help="only the first N questions")
     parser.add_argument("--endpoint", choices=["ask-quick", "ask"], default="ask-quick")
     parser.add_argument("--baseline", help="summary.json of an earlier run")
-    parser.add_argument("--max-drop", type=float, default=5.0, help="allowed fall in percent points")
+    parser.add_argument(
+        "--max-drop", type=float, default=5.0, help="allowed fall in percent points"
+    )
     return parser.parse_args()
 
 

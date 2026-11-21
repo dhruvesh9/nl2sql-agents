@@ -3,6 +3,7 @@
 import pytest
 
 from app import llm
+from app.errors import LlmError
 
 
 def fake_llm(monkeypatch: pytest.MonkeyPatch, answers: list[str]) -> list[str]:
@@ -58,14 +59,14 @@ def test_retry_answer_with_fences_is_cleaned(monkeypatch: pytest.MonkeyPatch) ->
 
 def test_bad_json_twice_raises_clear_error(monkeypatch: pytest.MonkeyPatch) -> None:
     messages = fake_llm(monkeypatch, ["bad one", "bad two"])
-    with pytest.raises(ValueError, match="bad two"):
+    with pytest.raises(LlmError, match="bad two"):
         llm.call_llm_json("system", "user")
     assert len(messages) == 2  # one try and one retry, never more
 
 
 def test_empty_answer_fails_cleanly(monkeypatch: pytest.MonkeyPatch) -> None:
     fake_llm(monkeypatch, ["", ""])
-    with pytest.raises(ValueError):
+    with pytest.raises(LlmError):
         llm.call_llm_json("system", "user")
 
 

@@ -9,9 +9,10 @@ import time
 from json import loads
 from typing import Any
 
-from together import Together
+from together import RateLimitError, Together, TogetherError
 
 from app.config import LlmParams, settings
+from app.errors import LlmError
 from app.tracing import observe
 
 logger = logging.getLogger(__name__)
@@ -74,19 +75,25 @@ def call_llm(system_prompt: str, user_message: str, agent: str = "default") -> s
         start = time.perf_counter()
         # Some models (for example Qwen3.8-Flash) accept only streaming requests.
         # Streaming works for all models, so we always stream and join the parts.
-        stream = client.chat.completions.create(
-            model=options["model"],
-            messages=messages,
-            stream=True,
-            **request,
-        )
         parts: list[str] = []
         usage: dict[str, int] = {}
-        for chunk in stream:
-            if chunk.choices and chunk.choices[0].delta.content:
-                parts.append(chunk.choices[0].delta.content)
-            if getattr(chunk, "usage", None):  # the last chunk can hold the token counts
-                usage = _usage_as_dict(chunk)
+        try:
+            stream = client.chat.completions.create(
+                model=options["model"],
+                messages=messages,
+                stream=True,
+                **request,
+            )
+            for chunk in stream:
+                if chunk.choices and chunk.choices[0].delta.content:
+                    parts.append(chunk.choices[0].delta.content)
+                if getattr(chunk, "usage", None):  # the last chunk can hold the token counts
+                    usage = _usage_as_dict(chunk)
+        except RateLimitError as error:
+            raise LlmError("rate_limited", str(error)) from error
+        except TogetherError as error:
+            # Timeout, no connection, 5xx, bad key: for the user these are all "not available".
+            raise LlmError("unavailable", f"{type(error).__name__}: {error}") from error
         text = "".join(parts)
         elapsed_ms = int((time.perf_counter() - start) * 1000)
         generation.update(output=text, usage_details=usage)
@@ -166,6 +173,7 @@ def call_llm_json(system_prompt: str, user_message: str, agent: str = "default")
         return parse_json_text(retry_answer)
     except ValueError as error:
         # Put the bad text in the message. It is the first thing you need to debug this.
-        raise ValueError(
-            f"The LLM did not return valid JSON after one retry. Last answer: {retry_answer!r}"
+        raise LlmError(
+            "bad_output",
+            f"The LLM did not return valid JSON after one retry. Last answer: {retry_answer!r}",
         ) from error

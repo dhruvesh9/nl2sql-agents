@@ -1,6 +1,8 @@
-"""Quick end-to-end pipeline: steps 1, 2, 3, 5 and 7, with no feedback loops.
+"""Quick end-to-end pipeline: steps 1, 2, 3, 5, 7 and 8, with no feedback loops.
 
-Pipeline step: 1, 2, 3, 5, 7. Used by POST /ask-quick.
+Pipeline step: 1, 2, 3, 5, 7, 8. Used by POST /ask-quick.
+The steps raise errors when they fail. run_quick catches every error in ONE place and gives it
+to the Response Agent (step 8), which builds the client response. The steps write no messages.
 It is a shortcut to see the whole flow work. It skips steps 4 and 6.
 It sends the runbooks from step 1 to the SQL generator, so business rules (for example
 "unpaid" means status 'O') reach the SQL.
@@ -13,7 +15,7 @@ import time
 from typing import Any
 
 from app import db_client, knowledge, pipeline, table_graph
-from app.agents import query_analyzer, sql_generator, table_classifier
+from app.agents import query_analyzer, response_agent, sql_generator, table_classifier
 from app.config import settings
 from app.models import AskResponse, TraceEntry
 
@@ -61,10 +63,9 @@ def _write_sql(requirements: dict[str, Any], tables: list[str], trace: list[Trac
     return generated["sql"]
 
 
-def run_quick(question: str) -> AskResponse:
-    """Analyze the question, pick the tables, write the SQL, and run it once."""
-    trace: list[TraceEntry] = []
-    logger.info("ask-quick start: question=%r", question)
+def _run(question: str, trace: list[TraceEntry], request_id: str) -> AskResponse:
+    """The steps in order. Any failure is raised, and run_quick turns it into a response."""
+    logger.info("ask-quick start: request_id=%s question=%r", request_id, question)
 
     start = time.perf_counter()
     requirements = query_analyzer.run(question, knowledge.read_index())
@@ -73,13 +74,11 @@ def run_quick(question: str) -> AskResponse:
 
     # A greeting ("hello") needs no tables, so we stop before any more LLM calls.
     if requirements["intent"] == "chitchat":
-        return AskResponse(
-            status="failed", failure_reason="This is not a data question.", trace=trace
-        )
+        return response_agent.for_message("chitchat", question, request_id, trace)
 
     tables = _select_tables(requirements, trace)
     if not tables:
-        return AskResponse(status="failed", failure_reason="No tables selected.", trace=trace)
+        return response_agent.for_message("no_matching_data", question, request_id, trace)
 
     sql = _write_sql(requirements, tables, trace)
 
@@ -87,11 +86,17 @@ def run_quick(question: str) -> AskResponse:
     try:
         result = db_client.run_query(sql)
     except db_client.DbServiceError as error:
-        # With no validator yet, a bad query shows up here. Return it so we can learn from it.
-        trace.append(_trace("7", "sql_execution", start, f"error: {error.detail}"))
-        return AskResponse(status="failed", sql=sql, failure_reason=error.detail, trace=trace)
+        # With no validator yet, a bad query shows up here. Keep the SQL in the trace for debugging.
+        trace.append(_trace("7", "sql_execution", start, f"error: {error.detail}; sql={sql}"))
+        raise
     trace.append(_trace("7", "sql_execution", start, f"rows={result['row_count']}"))
+    return response_agent.for_rows(result, sql, question, request_id, trace)
 
-    return AskResponse(
-        status="success", sql=sql, columns=result["columns"], rows=result["rows"], trace=trace
-    )
+
+def run_quick(question: str, request_id: str = "") -> AskResponse:
+    """Analyze the question, pick the tables, write the SQL, run it once, and build the response."""
+    trace: list[TraceEntry] = []
+    try:
+        return _run(question, trace, request_id)
+    except Exception as error:  # noqa: BLE001 - the one place that turns any failure into a response
+        return response_agent.for_error(error, request_id, trace)

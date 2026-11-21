@@ -5,7 +5,8 @@ from typing import Any
 import pytest
 
 from app import db_client, knowledge, quick_pipeline
-from app.agents import query_analyzer, sql_generator, table_classifier
+from app.agents import query_analyzer, response_agent, sql_generator, table_classifier
+from app.errors import LlmError
 
 GRAPH = {
     "nodes": [{"id": "orders", "description": "Purchase orders."}],
@@ -44,6 +45,7 @@ class Fakes:
         monkeypatch.setattr(db_client, "get_schema", lambda tables, fk_depth: SCHEMA)
         monkeypatch.setattr(sql_generator, "run", self.generator)
         monkeypatch.setattr(db_client, "run_query", self.run_query)
+        monkeypatch.setattr(response_agent, "call_llm", lambda *args, **kwargs: "A friendly reply.")
 
     def analyzer(self, question: str, index_md: str) -> dict[str, Any]:
         self.received["index_md"] = index_md
@@ -67,7 +69,7 @@ class Fakes:
     def run_query(self, sql: str) -> dict[str, Any]:
         if self.query_error:
             raise db_client.DbServiceError(400, self.query_error)
-        return {"columns": ["id"], "rows": [[1]], "row_count": 1}
+        return {"columns": ["id"], "rows": [[1], [2]], "row_count": 2}
 
 
 @pytest.fixture
@@ -75,11 +77,12 @@ def fakes(monkeypatch: pytest.MonkeyPatch) -> Fakes:
     return Fakes(monkeypatch)
 
 
-def test_happy_path_runs_every_step_and_returns_the_rows(fakes: Fakes) -> None:
+def test_happy_path_runs_every_step_and_returns_a_text_and_the_rows(fakes: Fakes) -> None:
     response = quick_pipeline.run_quick("List orders")
-    assert response.status == "success"
-    assert response.sql == "SELECT id FROM orders"
-    assert response.rows == [[1]]
+    assert response.answer == "Here are the results (2 rows)."
+    assert response.data.columns == ["id"]
+    assert response.data.rows == [[1], [2]]
+    assert response.sql == "SELECT id FROM orders"  # internal: for the logs, not for the client
     assert [entry.step for entry in response.trace] == ["1", "2", "3", "5", "7"]
 
 
@@ -97,32 +100,49 @@ def test_the_sql_generator_gets_the_runbooks_from_step_1(fakes: Fakes) -> None:
     assert fakes.received["runbook_texts"] == ["RUNBOOK rb"]
 
 
-def test_chitchat_stops_after_step_1(fakes: Fakes) -> None:
+def test_chitchat_gets_a_friendly_text_and_stops_after_step_1(fakes: Fakes) -> None:
     fakes.intent = "chitchat"
     response = quick_pipeline.run_quick("hello")
-    assert response.status == "failed"
+    assert response.answer == "A friendly reply."
+    assert response.data is None
     assert "requirements" not in fakes.received  # no classifier call, no cost, for a greeting
     assert [entry.name for entry in response.trace] == ["query_analyzer"]
 
 
-def test_no_tables_fails_before_the_database_is_called(fakes: Fakes) -> None:
+def test_no_tables_gets_a_text_before_the_database_is_called(fakes: Fakes) -> None:
     fakes.tables = []
     response = quick_pipeline.run_quick("q")
-    assert response.status == "failed"
+    assert response.answer == "A friendly reply."
+    assert response.data is None
     assert "schema_text" not in fakes.received
 
 
-def test_rejected_sql_is_returned_as_a_failure_with_the_sql(fakes: Fakes) -> None:
+def test_rejected_sql_becomes_an_error_and_the_sql_stays_in_the_trace(fakes: Fakes) -> None:
     fakes.query_error = "column bad does not exist"
+    response = quick_pipeline.run_quick("q", request_id="abc")
+    assert (response.code, response.request_id, response.data) == ("QUERY_FAILED", "abc", None)
+    assert "column bad" not in response.answer  # the detail is for the log, not for the user
+    assert "SELECT id FROM orders" in response.trace[-1].summary
+
+
+def test_an_error_in_any_agent_becomes_an_error_response(
+    fakes: Fakes, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def down(*args: Any, **kwargs: Any) -> None:
+        raise LlmError("unavailable", "timeout")
+
+    monkeypatch.setattr(table_classifier, "run", down)
     response = quick_pipeline.run_quick("q")
-    assert response.status == "failed"
-    assert response.sql == "SELECT id FROM orders"
-    assert response.failure_reason == "column bad does not exist"
+    assert (response.code, response.http_status) == ("LLM_UNAVAILABLE", 503)
+    assert [entry.step for entry in response.trace] == [
+        "1"
+    ]  # the steps before the failure are kept
 
 
-def test_the_client_gets_no_trace(fakes: Fakes) -> None:
-    # The trace is debug data. It goes to the logs and Langfuse, not to the client.
-    response = quick_pipeline.run_quick("List orders")
-    assert response.trace  # the pipeline still records the steps
-    body = response.model_dump()
-    assert set(body) == {"status", "sql", "columns", "rows", "failure_reason"}
+def test_the_client_gets_only_the_answer_the_rows_and_the_ids(fakes: Fakes) -> None:
+    # The trace, the SQL and the status are debug data. They go to the logs and Langfuse.
+    response = quick_pipeline.run_quick("List orders", request_id="abc")
+    assert response.trace
+    body = response.model_dump(exclude_none=True)
+    assert set(body) == {"answer", "data", "request_id"}
+    assert set(body["data"]) == {"columns", "rows", "truncated"}
