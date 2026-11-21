@@ -21,17 +21,3 @@ def test_health_ok_when_database_is_up() -> None:
     response = client.get("/health")
     assert response.status_code == 200
     assert response.json() == {"status": "ok", "database": True}
-
-
-def test_endpoints_need_api_key() -> None:
-    for path, body in [
-        ("/schema", {"tables": []}),
-        ("/plan", {"sql": "SELECT 1"}),
-        ("/query", {"sql": "SELECT 1"}),
-    ]:
-        assert client.post(path, json=body).status_code == 401
-
-
-def test_wrong_api_key_is_rejected() -> None:
-    response = client.post("/plan", json={"sql": "SELECT 1"}, headers={"X-API-Key": "wrong"})
-    assert response.status_code == 401

@@ -10,13 +10,10 @@ from app.schema_reader import read_table
 requires_db = pytest.mark.skipif(not check_connection(), reason="PostgreSQL is not running")
 
 client = TestClient(app)
-HEADERS = {"X-API-Key": "change-me"}
 
 
 def post_schema(tables: list[str], fk_depth: int = 0) -> dict:
-    response = client.post(
-        "/schema", json={"tables": tables, "fk_depth": fk_depth}, headers=HEADERS
-    )
+    response = client.post("/schema", json={"tables": tables, "fk_depth": fk_depth})
     assert response.status_code == 200
     return response.json()
 
@@ -84,6 +81,24 @@ def test_table_with_no_links_has_nothing_to_discover() -> None:
     assert post_schema(["usage_records"], fk_depth=3)["discovered_tables"] == []
 
 
-def test_schema_needs_api_key() -> None:
-    response = client.post("/schema", json={"tables": ["invoices"], "fk_depth": 0})
-    assert response.status_code == 401
+@requires_db
+def test_catalog_lists_every_table_sorted() -> None:
+    response = client.get("/catalog")
+    assert response.status_code == 200
+    body = response.json()
+    names = [table["name"] for table in body["tables"]]
+    assert names == sorted(names)
+    assert "invoices" in names
+    assert body["dialect"] == "postgresql"
+
+
+@requires_db
+def test_catalog_has_comments_and_both_address_foreign_keys() -> None:
+    tables = {table["name"]: table for table in client.get("/catalog").json()["tables"]}
+    assert tables["customers"]["description"]  # every sample table has a COMMENT ON TABLE
+    address_keys = [
+        fk["columns"]
+        for fk in tables["customers"]["foreign_keys"]
+        if fk["ref_table"] == "addresses"
+    ]
+    assert sorted(address_keys) == [["billing_address_id"], ["installation_address_id"]]

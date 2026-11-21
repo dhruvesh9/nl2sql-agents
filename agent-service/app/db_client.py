@@ -24,11 +24,10 @@ class DbServiceError(Exception):
 
 
 def _post(path: str, body: dict[str, Any]) -> dict[str, Any]:
-    """Send one POST request to db-service with the API key and a timeout."""
+    """Send one POST request to db-service with a timeout."""
     response = httpx.post(
         f"{settings.db_service_url}{path}",
         json=body,
-        headers={"X-API-Key": settings.db_service_api_key},
         timeout=settings.db_service_timeout_seconds,
     )
     if response.status_code >= 400:

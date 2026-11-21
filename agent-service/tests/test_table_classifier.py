@@ -76,7 +76,7 @@ def test_relationships_are_sent_only_when_they_exist(monkeypatch: pytest.MonkeyP
     table_classifier.run({}, TABLES_MD)
     assert "Table relationships" not in sent["user_message"]
 
-    table_classifier.run({}, TABLES_MD, relationships_md="invoices -> accounts")
+    table_classifier.run({}, TABLES_MD, relationships_text="invoices -> accounts")
     assert "Table relationships:\ninvoices -> accounts" in sent["user_message"]
 
 

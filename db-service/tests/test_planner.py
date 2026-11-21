@@ -10,11 +10,10 @@ from app.planner import build_explain_statement
 requires_db = pytest.mark.skipif(not check_connection(), reason="PostgreSQL is not running")
 
 client = TestClient(app)
-HEADERS = {"X-API-Key": "change-me"}
 
 
 def post_plan(sql: str):
-    return client.post("/plan", json={"sql": sql}, headers=HEADERS)
+    return client.post("/plan", json={"sql": sql})
 
 
 def test_explain_statement_for_postgresql() -> None:

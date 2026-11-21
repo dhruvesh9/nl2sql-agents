@@ -12,6 +12,7 @@ class ColumnInfo(BaseModel):
     name: str
     type: str
     nullable: bool
+    description: str | None = None  # the column comment (COMMENT ON COLUMN), if there is one
 
 
 class ForeignKeyInfo(BaseModel):
@@ -38,6 +39,26 @@ class SchemaResponse(BaseModel):
     tables: list[TableInfo]
     discovered_tables: list[str]
     not_found: list[str]
+
+
+class CatalogTable(BaseModel):
+    """One table in GET /catalog. It holds only what the knowledge graph needs.
+
+    No column types, primary keys, or nullable flags: the agent reads those live with /schema.
+    This keeps the answer small for a schema with 1000 tables.
+    """
+
+    name: str
+    description: str | None = None  # the table comment (COMMENT ON TABLE)
+    column_descriptions: dict[str, str]  # column name -> comment, only for columns with a comment
+    foreign_keys: list[ForeignKeyInfo]
+
+
+class CatalogResponse(BaseModel):
+    """Answer of GET /catalog: every table in the database."""
+
+    dialect: str
+    tables: list[CatalogTable]
 
 
 class PlanRequest(BaseModel):

@@ -22,7 +22,6 @@ class FakeService:
 
     def get(self, url: str, **kwargs) -> httpx.Response:
         self.calls += 1
-        assert kwargs["headers"]["X-API-Key"]  # every call must send the API key
         assert kwargs["timeout"] > 0  # every call must have a timeout
         if self.down:
             raise httpx.ConnectError("service is down")
@@ -56,49 +55,54 @@ def test_second_read_inside_the_ttl_does_not_call_the_service(service: FakeServi
 
 def test_each_document_has_its_own_cache_entry(service: FakeService) -> None:
     knowledge.read_index()
-    knowledge.read_tables()
+    knowledge.read_runbook("invoice_status")
     assert service.calls == 2
 
 
 def test_after_the_ttl_the_new_text_is_loaded(
     service: FakeService, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    knowledge.read_tables()
+    knowledge.read_index()
     expire_cache(monkeypatch)
     service.content = "text v2"
-    assert knowledge.read_tables() == "text v2"
+    assert knowledge.read_index() == "text v2"
 
 
 def test_service_down_after_the_ttl_returns_the_old_copy(
     service: FakeService, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    knowledge.read_tables()
+    knowledge.read_index()
     expire_cache(monkeypatch)
     service.down = True
-    assert knowledge.read_tables() == "text v1"
+    assert knowledge.read_index() == "text v1"
 
 
 def test_server_error_after_the_ttl_returns_the_old_copy(
     service: FakeService, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    knowledge.read_tables()
+    knowledge.read_index()
     expire_cache(monkeypatch)
     service.status = 500
-    assert knowledge.read_tables() == "text v1"
+    assert knowledge.read_index() == "text v1"
 
 
 def test_after_a_failed_refresh_we_do_not_call_the_service_on_every_read(
     service: FakeService, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     # If we retried on every read, a down service would slow down every question.
-    knowledge.read_tables()
+    knowledge.read_index()
     expire_cache(monkeypatch)
     service.down = True
-    knowledge.read_tables()  # the refresh fails, we keep the old copy
+    knowledge.read_index()  # the refresh fails, we keep the old copy
     calls_before = service.calls
     monkeypatch.setattr(settings, "knowledge_cache_ttl_seconds", 300)
-    knowledge.read_tables()
+    knowledge.read_index()
     assert service.calls == calls_before
+
+
+def test_read_graph_returns_the_whole_json_answer(service: FakeService) -> None:
+    # /graph answers with node-link JSON, not with {"content": ...}. The client must not unwrap it.
+    assert knowledge.read_graph() == {"content": "text v1"}
 
 
 def test_service_down_and_no_copy_raises_a_clear_error(service: FakeService) -> None:

@@ -8,7 +8,6 @@ from app import db_client
 
 def fake_post(status_code: int, json_body: dict):
     def post(url: str, **kwargs) -> httpx.Response:
-        assert kwargs["headers"]["X-API-Key"]  # every call must send the API key
         assert kwargs["timeout"] > 0  # every call must have a timeout
         return httpx.Response(status_code, json=json_body, request=httpx.Request("POST", url))
 

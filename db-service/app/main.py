@@ -1,19 +1,19 @@
-"""db-service FastAPI app: /health, /schema, /plan, /query.
+"""db-service FastAPI app: /health, /catalog, /schema, /plan, /query.
 
 This service is the only component that connects to the database.
 Pipeline step: infrastructure (serves steps 3, 6, and 7 of agent-service).
 """
 
 import logging
-import secrets
 
-from fastapi import Depends, FastAPI, Header, HTTPException, Request
+from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 
 from app import executor, planner, schema_reader
 from app.config import settings
 from app.database import check_connection
 from app.models import (
+    CatalogResponse,
     PlanRequest,
     PlanResponse,
     QueryRequest,
@@ -28,15 +28,8 @@ logging.basicConfig(
     format="%(asctime)s %(levelname)s %(name)s: %(message)s",
 )
 
+# No authentication for now. Later: JWT from Keycloak (user auth and service accounts).
 app = FastAPI(title="db-service")
-
-
-def require_api_key(x_api_key: str | None = Header(default=None)) -> None:
-    """Reject the request when the X-API-Key header is missing or wrong."""
-    expected = settings.service_api_key.encode()
-    # compare_digest takes the same time for any input. This stops timing attacks.
-    if x_api_key is None or not secrets.compare_digest(x_api_key.encode(), expected):
-        raise HTTPException(status_code=401, detail="Invalid or missing X-API-Key")
 
 
 @app.exception_handler(NotImplementedError)
@@ -59,16 +52,22 @@ def health() -> JSONResponse:
     return JSONResponse(status_code=status_code, content=body)
 
 
-@app.post("/schema", response_model=SchemaResponse, dependencies=[Depends(require_api_key)])
+@app.get("/catalog", response_model=CatalogResponse)
+def catalog() -> CatalogResponse:
+    """Return every table with its comments and foreign keys. knowledge-service calls it."""
+    return schema_reader.get_catalog()
+
+
+@app.post("/schema", response_model=SchemaResponse)
 def schema(request: SchemaRequest) -> SchemaResponse:
     return schema_reader.get_schema(request.tables, request.fk_depth)
 
 
-@app.post("/plan", response_model=PlanResponse, dependencies=[Depends(require_api_key)])
+@app.post("/plan", response_model=PlanResponse)
 def plan(request: PlanRequest) -> PlanResponse:
     return planner.get_plan(request.sql)
 
 
-@app.post("/query", response_model=QueryResponse, dependencies=[Depends(require_api_key)])
+@app.post("/query", response_model=QueryResponse)
 def query(request: QueryRequest) -> QueryResponse:
     return executor.run_query(request.sql, request.max_rows)

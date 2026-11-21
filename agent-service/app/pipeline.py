@@ -16,9 +16,25 @@ def schema_to_text(schema: dict[str, Any]) -> str:
           id INTEGER PK
           account_id INTEGER FK->accounts.id
     """
-    raise NotImplementedError(
-        "Live schema discovery (step 3) is not implemented yet. See the roadmap in README.md."
-    )
+    lines: list[str] = []
+    for table in schema["tables"]:
+        description = f" ({table['description']})" if table.get("description") else ""
+        lines.append(f"TABLE {table['name']}{description}")
+        primary_key = set(table.get("primary_key", []))
+        # One column can be part of several foreign keys, so we map column -> "table.column".
+        references = {
+            column: f"{fk['ref_table']}.{ref_column}"
+            for fk in table.get("foreign_keys", [])
+            for column, ref_column in zip(fk["columns"], fk["ref_columns"])
+        }
+        for column in table["columns"]:
+            parts = [column["name"], column["type"]]
+            if column["name"] in primary_key:
+                parts.append("PK")
+            if column["name"] in references:
+                parts.append(f"FK->{references[column['name']]}")
+            lines.append("  " + " ".join(parts))
+    return "\n".join(lines)
 
 
 def run_pipeline(question: str) -> AskResponse:

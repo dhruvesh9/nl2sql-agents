@@ -7,7 +7,14 @@ from sqlalchemy import inspect
 
 from app.config import settings
 from app.database import engine, get_dialect
-from app.models import ColumnInfo, ForeignKeyInfo, SchemaResponse, TableInfo
+from app.models import (
+    CatalogResponse,
+    CatalogTable,
+    ColumnInfo,
+    ForeignKeyInfo,
+    SchemaResponse,
+    TableInfo,
+)
 
 
 def read_table(table_name: str) -> TableInfo | None:
@@ -25,7 +32,12 @@ def read_table(table_name: str) -> TableInfo | None:
     for column in inspector.get_columns(table_name):
         # str() turns the SQLAlchemy type object into text, for example "VARCHAR(20)".
         columns.append(
-            ColumnInfo(name=column["name"], type=str(column["type"]), nullable=column["nullable"])
+            ColumnInfo(
+                name=column["name"],
+                type=str(column["type"]),
+                nullable=column["nullable"],
+                description=column.get("comment"),  # None when the column has no comment
+            )
         )
 
     foreign_keys = []
@@ -133,3 +145,40 @@ def get_schema(tables: list[str], fk_depth: int) -> SchemaResponse:
         discovered_tables=discovered,
         not_found=not_found,
     )
+
+
+def get_catalog() -> CatalogResponse:
+    """Read every table in the database. knowledge-service uses it to build the table graph.
+
+    Each get_multi_* call reads the whole schema in ONE query. read_table() sends about
+    5 queries per table, so 1000 tables would need about 5000 queries.
+    """
+    inspector = inspect(engine)
+    comments = inspector.get_multi_table_comment()
+    columns = inspector.get_multi_columns()
+    foreign_keys = inspector.get_multi_foreign_keys()
+
+    tables = []
+    # Each key is (schema, table_name). The schema is None for the default schema.
+    # Sorting by name makes the answer the same on every run.
+    for key in sorted(columns, key=lambda item: item[1]):
+        tables.append(
+            CatalogTable(
+                name=key[1],
+                description=comments.get(key, {}).get("text"),
+                column_descriptions={
+                    column["name"]: column["comment"]
+                    for column in columns[key]
+                    if column.get("comment")
+                },
+                foreign_keys=[
+                    ForeignKeyInfo(
+                        columns=item["constrained_columns"],
+                        ref_table=item["referred_table"],
+                        ref_columns=item["referred_columns"],
+                    )
+                    for item in foreign_keys.get(key, [])
+                ],
+            )
+        )
+    return CatalogResponse(dialect=get_dialect(), tables=tables)

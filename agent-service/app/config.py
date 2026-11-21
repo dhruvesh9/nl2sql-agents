@@ -36,10 +36,8 @@ class Settings(BaseSettings):
     sql_generator: LlmParams = LlmParams()
     sql_validator: LlmParams = LlmParams()
     db_service_url: str = "http://localhost:8001"
-    db_service_api_key: str
     db_service_timeout_seconds: float = 30
     knowledge_service_url: str = "http://localhost:8002"
-    knowledge_service_api_key: str
     knowledge_service_timeout_seconds: float = 10
     knowledge_cache_ttl_seconds: float = 300
     fk_depth: int = 1

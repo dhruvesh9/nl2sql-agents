@@ -6,6 +6,4 @@ An environment variable has priority over the .env file, so the tests never use 
 
 import os
 
-os.environ.setdefault("DB_SERVICE_API_KEY", "test-key")
-os.environ.setdefault("KNOWLEDGE_SERVICE_API_KEY", "test-key")
 os.environ["LANGFUSE_ENABLED"] = "false"  # a test must never send data to Langfuse

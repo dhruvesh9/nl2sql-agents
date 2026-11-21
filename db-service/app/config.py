@@ -11,7 +11,6 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
     database_url: str
-    service_api_key: str
     statement_timeout_ms: int = 5000
     default_max_rows: int = 100
     max_rows_limit: int = 1000

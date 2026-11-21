@@ -1,3 +1,5 @@
 fastapi==0.162.7            # web framework for the REST API
 uvicorn[standard]==0.54.0   # server that runs the FastAPI app
 pydantic-settings==2.16.3   # reads settings from the .env file
+httpx==0.28.1               # calls db-service GET /catalog (POST /generate)
+networkx==3.7               # builds the table graph and writes it as node-link JSON

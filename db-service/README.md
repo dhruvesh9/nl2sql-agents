@@ -1,7 +1,7 @@
 # db-service: API reference for agent-service
 
 db-service is the only component that connects to the database.
-Base URL: `http://localhost:8001`. Every call except `/health` needs the header `X-API-Key`.
+Base URL: `http://localhost:8001`. There is no authentication for now (later: Keycloak and JWT).
 From Python, use `agent-service/app/db_client.py`: `get_schema`, `get_plan`, `run_query`.
 
 ## Errors
@@ -9,11 +9,22 @@ From Python, use `agent-service/app/db_client.py`: `get_schema`, `get_plan`, `ru
 | Status | Meaning |
 |---|---|
 | 400 | The SQL was rejected. `{"detail": "<reason>"}`. Examples: not a SELECT, more than one statement, wrong column, timeout. |
-| 401 | The API key is missing or wrong. |
 | 422 | The request body has the wrong shape. |
 
 `db_client` raises `DbServiceError(status_code, detail)` for every status of 400 or more.
 Use `detail` as feedback for the SQL generator.
+
+## GET /catalog
+
+Every table in the database, for knowledge-service `POST /generate`.
+It reads the whole schema with the SQLAlchemy `get_multi_*` functions: about 3 catalog queries in total,
+not 5 per table. It returns only comments and foreign keys. Column types come live from `/schema`.
+
+```bash
+curl -s localhost:8001/catalog
+# {"dialect":"postgresql","tables":[{"name":"accounts","description":"Billing accounts. ...",
+#   "column_descriptions":{"status":"Account status: ..."},"foreign_keys":[...]}, ...]}
+```
 
 ## POST /schema
 
@@ -22,7 +33,7 @@ linked by foreign keys (both directions). `fk_depth` is limited by `MAX_FK_DEPTH
 The discovered tables are in `tables` too, so one call is enough.
 
 ```bash
-curl -s -X POST localhost:8001/schema -H 'X-API-Key: change-me' -H 'Content-Type: application/json' \
+curl -s -X POST localhost:8001/schema -H 'Content-Type: application/json' \
   -d '{"tables": ["invoices", "nope"], "fk_depth": 1}'
 ```
 Result: `tables` (invoices, accounts, invoice_lines, payments), `discovered_tables`
@@ -35,7 +46,7 @@ Checks the SQL and asks the database for the plan. It never runs the query.
 A database error (wrong table or column) is not an HTTP error. You get `valid: false` and the message.
 
 ```bash
-curl -s -X POST localhost:8001/plan -H 'X-API-Key: change-me' -H 'Content-Type: application/json' \
+curl -s -X POST localhost:8001/plan -H 'Content-Type: application/json' \
   -d '{"sql": "SELECT nme FROM customers"}'
 # {"valid":false,"error":"column \"nme\" does not exist",...}
 ```
@@ -50,7 +61,7 @@ Runs the SQL in a read-only transaction with a timeout (`STATEMENT_TIMEOUT_MS`, 
 `Decimal` values become numbers. Dates become ISO text.
 
 ```bash
-curl -s -X POST localhost:8001/query -H 'X-API-Key: change-me' -H 'Content-Type: application/json' \
+curl -s -X POST localhost:8001/query -H 'Content-Type: application/json' \
   -d '{"sql": "SELECT status, COUNT(*) AS n FROM invoices GROUP BY status", "max_rows": 10}'
 # {"columns":["status","n"],"rows":[["C",20],["O",60],["P",120]],"row_count":3,"truncated":false,"elapsed_ms":3}
 ```

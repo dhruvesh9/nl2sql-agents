@@ -1,16 +1,17 @@
-"""knowledge-service FastAPI app: /health, /index, /tables, /relationships, /runbooks/{name}.
+"""knowledge-service FastAPI app: /health, /index, /graph, /generate, /runbooks/{name}.
 
 This service owns the knowledge base (business rules and table descriptions).
 Pipeline step: infrastructure (serves steps 1, 2, and 5 of agent-service).
 """
 
 import logging
-import secrets
+from typing import Any
 
-from fastapi import Depends, FastAPI, Header, HTTPException, Request
+import httpx
+from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 
-from app import store
+from app import graph_builder, store
 from app.config import settings
 from app.models import ContentResponse
 
@@ -19,15 +20,8 @@ logging.basicConfig(
     format="%(asctime)s %(levelname)s %(name)s: %(message)s",
 )
 
+# No authentication for now. Later: JWT from Keycloak (user auth and service accounts).
 app = FastAPI(title="knowledge-service")
-
-
-def require_api_key(x_api_key: str | None = Header(default=None)) -> None:
-    """Reject the request when the X-API-Key header is missing or wrong."""
-    expected = settings.service_api_key.encode()
-    # compare_digest takes the same time for any input. This stops timing attacks.
-    if x_api_key is None or not secrets.compare_digest(x_api_key.encode(), expected):
-        raise HTTPException(status_code=401, detail="Invalid or missing X-API-Key")
 
 
 @app.exception_handler(FileNotFoundError)
@@ -41,29 +35,35 @@ def handle_bad_name(request: Request, exc: ValueError) -> JSONResponse:
     return JSONResponse(status_code=400, content={"detail": str(exc)})
 
 
+@app.exception_handler(httpx.HTTPError)
+def handle_db_service_error(request: Request, exc: httpx.HTTPError) -> JSONResponse:
+    # POST /generate needs db-service. When db-service fails, the answer is "bad gateway".
+    return JSONResponse(status_code=502, content={"detail": f"db-service failed: {exc}"})
+
+
 @app.get("/health")
 def health() -> dict[str, str]:
     """Return 200 when the service runs. No API key needed."""
     return {"status": "ok"}
 
 
-@app.get("/index", response_model=ContentResponse, dependencies=[Depends(require_api_key)])
+@app.get("/index", response_model=ContentResponse)
 def get_index() -> ContentResponse:
     return ContentResponse(content=store.read_index())
 
 
-@app.get("/tables", response_model=ContentResponse, dependencies=[Depends(require_api_key)])
-def get_tables() -> ContentResponse:
-    return ContentResponse(content=store.read_tables())
+@app.get("/graph")
+def get_graph() -> dict[str, Any]:
+    """Return graph.json as node-link JSON. Not Markdown, so not {"content": ...}."""
+    return store.read_graph()
 
 
-@app.get("/relationships", response_model=ContentResponse, dependencies=[Depends(require_api_key)])
-def get_relationships() -> ContentResponse:
-    return ContentResponse(content=store.read_relationships())
+@app.post("/generate")
+def generate() -> dict[str, Any]:
+    """Build graph.json again from the live database (through db-service). Return a summary."""
+    return graph_builder.generate()
 
 
-@app.get(
-    "/runbooks/{name}", response_model=ContentResponse, dependencies=[Depends(require_api_key)]
-)
+@app.get("/runbooks/{name}", response_model=ContentResponse)
 def get_runbook(name: str) -> ContentResponse:
     return ContentResponse(content=store.read_runbook(name))

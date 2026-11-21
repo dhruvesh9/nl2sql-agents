@@ -1,4 +1,4 @@
-"""Reads the knowledge base files: index.md, tables.md, table_relationship.md, and runbooks.
+"""Reads the knowledge base files: index.md, graph.json, and runbooks.
 
 Pipeline step: serves steps 1A (index), 2A (tables and relationships), and 5A (runbooks) of agent-service.
 
@@ -6,8 +6,10 @@ We do not use RAG here. The files are small, so the agent passes the whole text 
 This is simpler, and there are no retrieval errors.
 """
 
+import json
 import re
 from pathlib import Path
+from typing import Any
 
 from app.config import settings
 
@@ -28,19 +30,16 @@ def read_index() -> str:
     return _read_file(_base_dir() / "index.md")
 
 
-def read_tables() -> str:
-    """Return the text of tables.md (one line per table)."""
-    return _read_file(_base_dir() / "tables.md")
-
-
-def read_relationships() -> str:
-    """Return the text of table_relationship.md, or "" if the file is empty or missing.
-
-    The file shows how the tables link to each other. It is optional,
-    so a missing file is not an error.
-    """
-    path = _base_dir() / "table_relationship.md"
-    return path.read_text(encoding="utf-8").strip() if path.is_file() else ""
+def read_graph() -> dict[str, Any]:
+    """Return graph.json: the table graph that POST /generate builds (node-link JSON)."""
+    path = _base_dir() / "graph.json"
+    if not path.is_file():
+        raise FileNotFoundError("graph.json not found. Run POST /generate first.")
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as error:
+        # Only a hand edit can break the file: /generate writes it in one atomic step.
+        raise RuntimeError(f"graph.json is not valid JSON: {error}") from error
 
 
 def read_runbook(name: str) -> str:

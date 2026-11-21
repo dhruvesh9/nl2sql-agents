@@ -11,32 +11,27 @@ that measures the accuracy of every agent before the next one is built.
 
 ## What works today
 
-Send a question to `POST /analyze` (agent 1, then agent 2). The service answers with the
-structured requirements and the tables that the question needs, including the tables on the join path:
+Send a question to `POST /ask-quick`. It runs the flow end to end with no feedback loops:
+query analyzer, table classifier, live schema, SQL generator, and query execution.
 
 ```bash
-curl -s -X POST localhost:8000/analyze -H 'Content-Type: application/json' \
+curl -s -X POST localhost:8000/ask-quick -H 'Content-Type: application/json' \
   -d '{"question": "Total refund amount per customer city"}'
 ```
 
 ```json
 {
-  "requirements": {
-    "intent": "aggregate",
-    "requested_fields": ["total refund amount", "customer city"],
-    "aggregations": ["sum"],
-    "runbook_candidates": ["customer_address_join"]
-  },
-  "selected_tables": ["refunds", "payments", "invoices", "accounts", "customers", "addresses"],
-  "reason": "Refund amounts must be summed by customer city, requiring the refund-to-payment-to-invoice-to-account-to-customer-to-address join path.",
-  "trace": [
-    {"step": "1", "name": "query_analyzer", "elapsed_ms": 1978},
-    {"step": "2", "name": "table_classifier", "elapsed_ms": 4785}
-  ]
+  "status": "success",
+  "sql": "SELECT a.city, SUM(r.amount) AS total_refund_amount FROM refunds r JOIN payments p ON r.payment_id = p.id JOIN invoices i ON p.invoice_id = i.id JOIN accounts acc ON i.account_id = acc.id JOIN customers c ON acc.customer_id = c.id JOIN addresses a ON c.billing_address_id = a.id GROUP BY a.city",
+  "columns": ["city", "total_refund_amount"],
+  "rows": [["Leeds", 130.0], ["London", 125.0], ["Glasgow", 160.0]],
+  "failure_reason": null
 }
 ```
 
 A greeting such as "hello" stops after agent 1. It needs no tables, so it costs one LLM call.
+The step details (time and summary of each step) go to the agent-service log and to Langfuse.
+`POST /ask` is the full flow with the feedback loops. It is not implemented yet.
 
 ## Architecture
 
@@ -212,7 +207,7 @@ Makefile               db-load, dbsvc, knowledge, agent, eval-tables, test, lint
 | Agent 2: Table Classifier, with an eval at 90% or more | Done |
 | Eval harness with ground truth and per-question logs | Done |
 | Runbook text for the Table Classifier (the usage-to-subscriptions link has no foreign key) | Next |
-| Generate `tables.md` and `table_relationship.md` from the live database | Planned |
+| Table graph (`graph.json`, networkx) generated from the live database; replaces `tables.md` and `table_relationship.md` | Done |
 | Shortest-path join discovery in code, so the LLM only picks the main tables | Planned |
 | Agent 3: Table feedback loop (steps 3 and 4) | Planned |
 | Agent 4: SQL Generator, and Agent 5: SQL Validator with a plan check and a judge | Planned |

@@ -14,11 +14,10 @@ from app.main import app
 requires_db = pytest.mark.skipif(not check_connection(), reason="PostgreSQL is not running")
 
 client = TestClient(app)
-HEADERS = {"X-API-Key": "change-me"}
 
 
 def post_query(sql: str, max_rows: int | None = None):
-    return client.post("/query", json={"sql": sql, "max_rows": max_rows}, headers=HEADERS)
+    return client.post("/query", json={"sql": sql, "max_rows": max_rows})
 
 
 def test_to_json_safe_converts_special_values() -> None:

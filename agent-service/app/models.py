@@ -26,17 +26,9 @@ class AskResponse(BaseModel):
     columns: list[str] = Field(default_factory=list)
     rows: list[list[Any]] = Field(default_factory=list)
     failure_reason: str | None = None
-    trace: list[TraceEntry] = Field(default_factory=list)
-
-
-class AnalyzeResponse(BaseModel):
-    """Answer of POST /analyze: the mini pipeline with step 1 and step 2 only."""
-
-    question: str
-    requirements: dict[str, Any] = Field(default_factory=dict)  # output of step 1
-    selected_tables: list[str] = Field(default_factory=list)  # output of step 2
-    reason: str = ""  # why step 2 chose these tables
-    trace: list[TraceEntry] = Field(default_factory=list)
+    # The steps that ran, for debugging. exclude=True keeps it out of the JSON that the client gets.
+    # The app sends it to the logs and to the Langfuse trace instead.
+    trace: list[TraceEntry] = Field(default_factory=list, exclude=True)
 
 
 class PipelineState(BaseModel):

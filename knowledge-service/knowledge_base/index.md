@@ -1,7 +1,7 @@
 # Knowledge base index
 
 This is a telecom billing database. Use this file to find the runbooks that apply to a question.
-The list of tables is in `tables.md`. The columns of each table come live from the database.
+The columns of each table come live from the database.
 
 ## Runbooks
 
@@ -12,6 +12,3 @@ The list of tables is in `tables.md`. The columns of each table come live from t
 | `invoice_status` | invoice, unpaid, open, paid, cancelled, overdue, status | The meaning of the invoices.status codes O, P, and C. |
 | `customer_address_join` | address, billing address, installation address, city, postcode | How to join customers to addresses. Two join paths exist. |
 
-## Tables
-
-See `tables.md` for one line per table.
