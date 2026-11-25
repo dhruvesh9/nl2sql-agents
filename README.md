@@ -7,6 +7,8 @@ writes a SQL `SELECT`, and a guarded read-only service runs it. You get back an 
 > **[Open the interactive architecture explorer](https://dhruvesh9.github.io/nl2sql-agents/explorer/)**:
 > pick a scenario and watch the question flow through the agents and services, with the safety layers and the error contract.
 > No setup is needed. It uses example data and does not call a real model or database.
+>
+> **[View the architecture diagram](explorer/architecture.png)** (components, pipeline steps, and the calls between services).
 
 Built as three small FastAPI services plus an eval project that measures every agent against ground truth.
 
