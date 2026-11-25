@@ -1,9 +1,10 @@
-.PHONY: help up down eval-classifier eval-sql eval-system db-load db-local-reset dbsvc knowledge kb-generate agent eval eval-check test lint
+.PHONY: help db-up db-down db-reset up down eval-classifier eval-sql eval-system db-load db-local-reset dbsvc knowledge kb-generate agent eval eval-check test lint
 .DEFAULT_GOAL := help
 
 # Plain "make" only prints this list. It never starts anything.
 help:
-	@echo "Database (local PostgreSQL):"
+	@echo "Database (Docker, easiest): make db-up | make db-down | make db-reset  (creates tables, loads sample data)"
+	@echo "Database (own local PostgreSQL):"
 	@echo "  make db-load         load sample data and read-only role (needs PGPASSWORD)"
 	@echo "  make db-local-reset  delete all tables in schema public, then load again"
 	@echo "Start:  make up | make down  (postgres + all 3 services in the background)"
@@ -11,6 +12,19 @@ help:
 	@echo "KB:     make kb-generate  (build graph.json from the live database; dbsvc and knowledge must run)"
 	@echo "Eval:   make eval  (3 levels, see eval/README.md)"
 	@echo "Check:  make test | make lint"
+
+# Docker: start PostgreSQL. On the first start it runs database/init/*.sql by itself
+# (schema, sample data, read-only role). The data stays in a Docker volume.
+db-up:
+	docker compose up -d --wait db
+
+db-down:
+	docker compose down
+
+# Delete the Docker volume and start again, so the init scripts run again.
+db-reset:
+	docker compose down -v
+	docker compose up -d --wait db
 
 # The owner of the nl2sql database runs the SQL files.
 # Set the password with PGPASSWORD or ~/.pgpass. Do not put it in this file.

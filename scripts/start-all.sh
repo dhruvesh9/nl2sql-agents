@@ -8,13 +8,19 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 RUN="$ROOT/.run"
 mkdir -p "$RUN"
 
-# 1. PostgreSQL. A system service, so it may need sudo.
-if ! pg_isready -q; then
-  echo "PostgreSQL is down. Starting cluster 17/main (sudo may ask for a password)..."
-  sudo pg_ctlcluster 17 main start
-  for _ in $(seq 1 20); do pg_isready -q && break; sleep 1; done
+# 1. PostgreSQL. Use Docker if it is available (it also loads the sample data on the first start).
+# Otherwise start a local system cluster, which may need sudo.
+if ! pg_isready -h localhost -q; then
+  if command -v docker >/dev/null 2>&1 && docker info >/dev/null 2>&1; then
+    echo "PostgreSQL is down. Starting it with Docker..."
+    (cd "$ROOT" && docker compose up -d --wait db)
+  else
+    echo "PostgreSQL is down. Starting cluster 17/main (sudo may ask for a password)..."
+    sudo pg_ctlcluster 17 main start
+    for _ in $(seq 1 20); do pg_isready -h localhost -q && break; sleep 1; done
+  fi
 fi
-pg_isready -q || { echo "PostgreSQL did not start."; exit 1; }
+pg_isready -h localhost -q || { echo "PostgreSQL did not start."; exit 1; }
 echo "postgres  ok"
 
 # 2. The three FastAPI services. Order: db and knowledge first, because agent needs both.

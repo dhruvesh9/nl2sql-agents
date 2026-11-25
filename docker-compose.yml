@@ -1,0 +1,25 @@
+# Local PostgreSQL with the sample database (telecom billing, 25 tables).
+# On the FIRST start, PostgreSQL runs every file in database/init/ in name order:
+# schema, seed data, and the read-only role that db-service uses.
+# To use your own database instead, do not run this file. Set DATABASE_URL in db-service/.env.
+services:
+  db:
+    image: postgres:16
+    container_name: nl2sql-postgres
+    environment:
+      POSTGRES_DB: nl2sql
+      POSTGRES_USER: admin          # the owner. db-service never uses it.
+      POSTGRES_PASSWORD: change-me  # demo value. Change it for anything that is not local.
+    ports:
+      - "5432:5432"
+    volumes:
+      - ./database/init:/docker-entrypoint-initdb.d:ro
+      - nl2sql-pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U admin -d nl2sql"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+
+volumes:
+  nl2sql-pgdata:

@@ -99,25 +99,37 @@ timeouts and edge-error handling, and the eval harness.
 
 ## Quickstart
 
-You need Python 3.12+, PostgreSQL 16+, `make`, `psql`, `curl`, and a [Together AI](https://api.together.ai) API key.
+You need Python 3.12+, PostgreSQL 16+ (or Docker), `make`, `curl`, and a [Together AI](https://api.together.ai) API key.
+
+**1. Create the database with the sample data** (a telecom billing schema with 25 tables).
+
+Option A, Docker (easiest). The first start creates the tables, loads the data, and creates the read-only role by itself:
 
 ```bash
-# 1. Create the database and load the sample data (a telecom billing schema with 25 tables)
+make db-up        # make db-down stops it, make db-reset starts again from zero
+```
+
+Option B, your own local PostgreSQL:
+
+```bash
 sudo -u postgres psql -c "CREATE DATABASE nl2sql OWNER admin;"   # any owner role works
 PGPASSWORD=<password of the owner> make db-load
+# another owner: make db-load LOCAL_DB_URL=postgresql://user@localhost:5432/nl2sql
+```
 
-# 2. Create a virtual environment for each project
+Or skip both and [use your own database](#use-your-own-database).
+
+**2. Create a virtual environment for each project, and the `.env` files**
+
+```bash
 for p in db-service agent-service knowledge-service eval; do
   python3 -m venv $p/.venv && $p/.venv/bin/pip install -r $p/requirements-dev.txt
 done
-
-# 3. Create the .env files, then put your TOGETHER_API_KEY in agent-service/.env
 for p in db-service agent-service knowledge-service; do cp $p/.env.example $p/.env; done
+# then put your TOGETHER_API_KEY in agent-service/.env
 ```
 
-`make db-load` uses the owner `admin` by default. For another owner:
-`make db-load LOCAL_DB_URL=postgresql://user@localhost:5432/nl2sql`.
-The example `.env` files hold demo values (`change-me`, `reader_pw`). Change them for anything that is not local.
+The example `.env` files and `docker-compose.yml` hold demo values (`change-me`, `reader_pw`). Change them for anything that is not local.
 
 Run the services, one terminal each:
 
@@ -128,13 +140,15 @@ make agent        # agent-service on http://localhost:8000
 ```
 
 Or start everything in the background with `make up` (logs go to `.run/`, `make down` stops the services).
-`make up` expects PostgreSQL to be running. If it is not, the script tries to start a local cluster with `sudo`.
+If PostgreSQL is down, `make up` starts it with Docker, or else tries a local cluster with `sudo`.
 
 Check health with `curl localhost:8001/health`, `curl localhost:8002/health`, `curl localhost:8000/health`.
 Then send the `curl` request from the top of this file.
 
 ## Use your own database
 
+You have two choices. The **sample database** is the default: `make db-up` creates it from the SQL scripts in
+`database/init/`, and the shipped knowledge base describes it. Or you use **your own database**.
 The services talk to each other only over REST, and no table name is hard-coded in the Python code.
 So you can point the system at your own PostgreSQL database and your own knowledge base.
 
@@ -283,7 +297,8 @@ See [`eval/README.md`](eval/README.md).
 ## Project structure
 
 ```
-database/init/         sample database: schema, seed data, read-only role
+database/init/         sample database: schema, seed data, read-only role (run by docker-compose.yml)
+docker-compose.yml     local PostgreSQL that loads database/init/ on its first start
 db-service/            SQL guard, schema reader, planner, executor
 knowledge-service/     knowledge_base/: index, generated table graph, runbooks
 agent-service/         agents, prompts, LLM client, knowledge client, tracing
