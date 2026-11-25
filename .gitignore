@@ -10,13 +10,6 @@ __pycache__/
 .env.*
 !.env.example
 
-# Local working files that are not part of the published project
-CLAUDE.md
-KICKOFF.md
-docs/
-.claude/
-*.backup.md
-
 # Results of eval runs
 eval/results/
 
@@ -24,3 +17,6 @@ eval/results/
 .vscode/
 .idea/
 .DS_Store
+
+# Pid files and logs of scripts/start-all.sh
+.run/

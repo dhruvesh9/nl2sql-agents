@@ -1,4 +1,4 @@
-.PHONY: help db-load db-local-reset dbsvc knowledge kb-generate agent eval eval-check test lint
+.PHONY: help up down eval-classifier eval-sql eval-system db-load db-local-reset dbsvc knowledge kb-generate agent eval eval-check test lint
 .DEFAULT_GOAL := help
 
 # Plain "make" only prints this list. It never starts anything.
@@ -6,6 +6,7 @@ help:
 	@echo "Database (local PostgreSQL):"
 	@echo "  make db-load         load sample data and read-only role (needs PGPASSWORD)"
 	@echo "  make db-local-reset  delete all tables in schema public, then load again"
+	@echo "Start:  make up | make down  (postgres + all 3 services in the background)"
 	@echo "Run:    make dbsvc | make knowledge | make agent"
 	@echo "KB:     make kb-generate  (build graph.json from the live database; dbsvc and knowledge must run)"
 	@echo "Eval:   make eval  (3 levels, see eval/README.md)"
@@ -41,6 +42,24 @@ kb-generate:
 # Run agent-service on port 8000.
 agent:
 	cd agent-service && .venv/bin/uvicorn app.main:app --port 8000 --reload
+
+# Start PostgreSQL + db-service + knowledge-service + agent-service in the background. Logs: .run/
+up:
+	scripts/start-all.sh
+
+down:
+	scripts/stop-all.sh
+
+# The three eval levels as separate runs. They use the whole dataset (--split all, 32 questions with a gold SQL).
+# Add more options with ARGS, for example: make eval-sql ARGS="--repeat 3"
+eval-classifier:
+	$(MAKE) eval ARGS="--level classifier --split all $(ARGS)"
+
+eval-sql:
+	$(MAKE) eval ARGS="--level sql --split all $(ARGS)"
+
+eval-system:
+	$(MAKE) eval ARGS="--level system --split all $(ARGS)"
 
 # The dev eval: 3 levels (classifier, sql, system). It needs dbsvc, knowledge, and agent running.
 # It uses the agent-service venv, because levels 1 and 2 call the agent code directly.

@@ -1,18 +1,11 @@
 # nl2sql-agents
 
-Ask a question in plain English. LLM agents find the right tables in your database, and a guarded
-read-only service runs the SQL. Built as three small FastAPI services, with an eval project
-that measures the accuracy of every agent before the next one is built.
+Ask a question about your data in plain English. A small team of LLM agents finds the right tables,
+writes a SQL `SELECT`, and a guarded read-only service runs it. You get back an answer and the rows.
 
-**Stack:** Python 3.13, FastAPI, PostgreSQL, SQLAlchemy, sqlglot, Together AI, Langfuse, pytest.
+Built as three small FastAPI services plus an eval project that measures every agent against ground truth.
 
-> **Status:** work in progress. The database layer, the knowledge base, the first two agents, and the
-> eval harness work today. The SQL generator and the feedback loops are next. See the [roadmap](#roadmap).
-
-## What works today
-
-Send a question to `POST /ask-quick`. It runs the flow end to end with no feedback loops:
-query analyzer, table classifier, live schema, SQL generator, and query execution.
+**Stack:** Python 3.12+, FastAPI, PostgreSQL, SQLAlchemy, sqlglot, networkx, Together AI, Langfuse (optional), pytest.
 
 ```bash
 curl -s -X POST localhost:8000/ask-quick -H 'Content-Type: application/json' \
@@ -31,21 +24,27 @@ curl -s -X POST localhost:8000/ask-quick -H 'Content-Type: application/json' \
 }
 ```
 
-The response always has an `answer` text. `data` is there only when the query returned rows. It always has the same
-fields (`columns`, `rows`, `truncated`), so a UI can show it as a table or a chart. A single value comes back as a sentence, for example
-"There are 20 customers living in London." The SQL and the step details are not in the response.
-They go to the agent-service log and to Langfuse.
+## Contents
 
-A greeting such as "hello" stops after agent 1. It needs no tables, so it costs one LLM call.
-`POST /ask` is the full flow with the feedback loops. It is not implemented yet.
+- [Architecture](#architecture)
+- [Status](#status)
+- [Quickstart](#quickstart)
+- [Use your own database](#use-your-own-database)
+- [API](#api)
+- [Design decisions](#design-decisions)
+- [Configuration](#configuration)
+- [Tests and evals](#tests-and-evals)
+- [Project structure](#project-structure)
+- [Roadmap](#roadmap)
 
 ## Architecture
 
 ```mermaid
 flowchart LR
-    U([Question]) --> A["agent-service :8000<br/>agents + prompts"]
-    A -->|"index, tables, relationships, runbooks"| K["knowledge-service :8002"]
+    U([Client]) --> A["agent-service :8000<br/>agents + prompts"]
+    A -->|"index, table graph, runbooks"| K["knowledge-service :8002"]
     A -->|"schema, plan, query"| D["db-service :8001"]
+    K -->|"catalog (for graph.json)"| D
     D --> P[(PostgreSQL)]
     A -->|LLM calls| T[Together AI]
     A -.->|traces| L[Langfuse]
@@ -54,88 +53,52 @@ flowchart LR
 | Service | Job |
 |---|---|
 | `agent-service` | The workflow and the prompts. Each agent is one LLM call with a small, controlled context. |
-| `db-service` | The only component that connects to the database. It exposes `/schema`, `/plan`, and `/query`. |
-| `knowledge-service` | Owns the business knowledge: table descriptions, table relationships, and runbooks (business rules). |
+| `db-service` | The only component that connects to the database. Exposes `/catalog`, `/schema`, `/plan`, `/query`. |
+| `knowledge-service` | Owns the business knowledge: `index.md`, the generated table graph, and runbooks (business rules). |
 
-The agent never touches the database or the knowledge files. It calls the two services over HTTP.
-So each part can change, deploy, and be owned separately.
+The agent never touches the database or the knowledge files. It calls the two services over HTTP,
+so each part can change, deploy, and be owned separately.
 
-### The full pipeline (target design)
+### Pipeline
 
 ```mermaid
 flowchart TD
-    Q([Question]) --> S1["1. Query Analyzer"]
-    S1 -->|chit-chat| X([Stop: no tables needed])
+    Q([Question]) --> S1["1. Query Analyzer<br/>+ guardrail"]
+    S1 -->|"chit-chat / blocked"| S8
     S1 --> S2["2. Table Classifier"]
-    S2 --> S3["3. Live schema"]
+    S2 --> S3["3. Live schema (code)"]
     S3 --> S4["4. Table feedback"]
     S4 -->|"score below 80, max 3 tries"| S2
     S4 --> S5["5. SQL generator"]
     S5 --> S6["6. SQL validator"]
     S6 -->|"fail, max 3 tries"| S5
-    S6 --> S7["7. Execute"]
-    S7 --> S8([8. Response])
+    S6 --> S7["7. Execute (code)"]
+    S7 --> S8(["8. Response"])
 
     classDef done fill:#d4f4dd,stroke:#2d8a4e,color:#000;
-    class S1,S2 done;
+    class S1,S2,S3,S5,S7,S8 done;
 ```
 
-Green steps work today. The `db-service` endpoints behind steps 3, 6, and 7 (`/schema`, `/plan`, `/query`) are
-also done and tested. The agent-side wiring of those steps comes with the pipeline.
+Green steps are implemented. Steps 4 and 6 and the two feedback loops are planned.
 
-## Design decisions
+## Status
 
-**The database is read-only in three layers.** Every query must pass a sqlglot parser that accepts only
-`SELECT` (with unions and subqueries) and rejects `INSERT`, `UPDATE`, `DELETE`, `DROP`, `SELECT INTO`,
-and locking clauses. Then the service connects with a database role that has only `SELECT`, runs the query in
-a `READ ONLY` transaction, and enforces a statement timeout and a row limit. `/plan` uses `EXPLAIN`, never
-`EXPLAIN ANALYZE`, so a plan check never runs the query.
-
-**No RAG, no embeddings.** The knowledge base is small, so the agent sends the whole text to the LLM.
-This removes retrieval errors. Runbook text is loaded only when it is relevant, to keep the context small.
-
-**Schema details come live from the database, never from Markdown.** The knowledge base holds only what
-the database cannot say: short table descriptions, the table links, and business rules.
-
-**The knowledge base is its own service.** The agent caches each document for a short time (TTL). If the
-service fails during a refresh, the agent keeps the old copy, so a short outage does not stop it.
-A 404 is never hidden by the cache.
-
-**Each agent has its own LLM settings.** Model, temperature, `top_p`, `top_k`, and reasoning on or off are set per agent
-in `.env`, for example `TABLE_CLASSIFIER__REASONING_ENABLED=true`. See [Configuration](#configuration).
-
-**Any PostgreSQL works.** The only database setting is `DATABASE_URL`, and dialect code is in one place.
-It is built to move to a hosted provider such as Supabase by changing that one value. I have not tested a hosted provider yet.
-
-## Measured results
-
-Every agent must reach 90% on its own ground truth before the next agent is built.
-The Table Classifier is scored on the 30 data questions in [`eval/dataset/questions.toml`](eval/dataset/questions.toml).
-Each expected table list includes the tables on the join path, and the tests check it against the real schema.
-Scoring: PASS is an exact match. WARN means all expected tables plus extra ones, and counts as a success.
-FAIL means a missing table, because a missing table costs a retry loop later.
-
-| What changed | Table accuracy |
+| Endpoint | State |
 |---|---|
-| Table descriptions that name the related tables (hand-written hints) | 96.7% |
-| Plain descriptions only, no hints | 80.0% |
-| Plain descriptions + a `table_relationship.md` file (one `A -> B` line per foreign key) | 96.7% |
-| Same, with reasoning turned off for speed | 93.3% |
+| `POST /ask-quick` | **Works.** Steps 1, 2, 3, 5, 7, 8 with no feedback loops. It runs SQL that no validator has checked, so use it to see the flow end to end. |
+| `POST /ask` | Planned. Returns `501 NOT_IMPLEMENTED`. It adds table feedback (Loop A) and the SQL validator (Loop B). |
 
-Findings:
-- **A table-link file recovers the accuracy** without hand-written hints in the descriptions. It can be generated from the foreign keys.
-- **Reasoning cost most of the time.** In one measured call the model spent about 4 seconds on hidden thinking tokens for a 30-token
-  answer. With reasoning off, the call dropped from 4.5s to 1.3s, and the whole eval run from about 8 minutes to 1.5 minutes. One
-  question lost a bridge table, so reasoning is now a per-agent setting: off for the analyzer, on for the classifier.
-- With 30 questions, one question is 3.3 points, so small differences between runs are noise.
+Working today: all three services, the Query Analyzer with a guardrail, the Table Classifier, the SQL Generator,
+runbook loading, the Response Agent with a fixed error contract, request IDs, JSON logs, Langfuse traces,
+timeouts and edge-error handling, and the eval harness.
 
 ## Quickstart
 
-You need Python 3.12+, PostgreSQL 16, `make`, `psql`, and a [Together AI](https://api.together.ai) API key.
+You need Python 3.12+, PostgreSQL 16+, `make`, `psql`, `curl`, and a [Together AI](https://api.together.ai) API key.
 
 ```bash
 # 1. Create the database and load the sample data (a telecom billing schema with 25 tables)
-sudo -u postgres psql -c "CREATE DATABASE nl2sql OWNER admin;"
+sudo -u postgres psql -c "CREATE DATABASE nl2sql OWNER admin;"   # any owner role works
 PGPASSWORD=<password of the owner> make db-load
 
 # 2. Create a virtual environment for each project
@@ -147,9 +110,9 @@ done
 for p in db-service agent-service knowledge-service; do cp $p/.env.example $p/.env; done
 ```
 
-The default database owner in the Makefile is `admin`. For another owner, run
+`make db-load` uses the owner `admin` by default. For another owner:
 `make db-load LOCAL_DB_URL=postgresql://user@localhost:5432/nl2sql`.
-The example `.env` files use demo values (`change-me`, `reader_pw`). Change them for anything that is not local.
+The example `.env` files hold demo values (`change-me`, `reader_pw`). Change them for anything that is not local.
 
 Run the services, one terminal each:
 
@@ -159,13 +122,133 @@ make knowledge    # knowledge-service on http://localhost:8002
 make agent        # agent-service on http://localhost:8000
 ```
 
-Then use the `curl` command from [What works today](#what-works-today). Health checks:
-`curl localhost:8001/health`, `curl localhost:8002/health`, `curl localhost:8000/health`.
+Or start everything in the background with `make up` (logs go to `.run/`, `make down` stops the services).
+`make up` expects PostgreSQL to be running. If it is not, the script tries to start a local cluster with `sudo`.
+
+Check health with `curl localhost:8001/health`, `curl localhost:8002/health`, `curl localhost:8000/health`.
+Then send the `curl` request from the top of this file.
+
+## Use your own database
+
+The services talk to each other only over REST, and no table name is hard-coded in the Python code.
+So you can point the system at your own PostgreSQL database and your own knowledge base.
+
+1. **Point db-service at your database.** Set `DATABASE_URL` in `db-service/.env`. Any PostgreSQL works,
+   including hosted providers such as Supabase. Use a role that has only `SELECT`
+   (see `database/init/03_readonly_user.sql` for an example).
+2. **Describe your tables.** Table and column descriptions come from PostgreSQL comments
+   (`COMMENT ON TABLE ...`, `COMMENT ON COLUMN ...`). The agents read them live. Good comments, especially on
+   code columns such as `status`, improve accuracy more than anything else.
+3. **Build the table graph.** With `db-service` and `knowledge-service` running, run `make kb-generate`.
+   It reads every table and foreign key from your database and writes `knowledge-service/knowledge_base/graph.json`.
+   No LLM is used.
+4. **Write your knowledge base.** In `knowledge-service/knowledge_base/`, replace `index.md` and `runbooks/*.md`
+   with your own. A runbook is a short Markdown file with a business rule or a join that has no foreign key.
+   List each one in `index.md` with keywords. No code change is needed. You can also point
+   `KNOWLEDGE_BASE_DIR` in `knowledge-service/.env` to another folder. An empty `runbooks/` folder works too.
+5. **Change one prompt line.** `agent-service/app/prompts/query_analyzer.md` says the data is "a telecom billing
+   database". Change that domain wording so the analyzer knows what counts as an on-topic question.
+6. **Eval (optional).** `eval/dataset/questions.toml` holds the questions for the sample database.
+   Replace it with questions and gold SQL for your schema to measure your own accuracy.
+
+Limits:
+- **PostgreSQL only for now.** The dialect-specific code (`EXPLAIN`, read-only transactions) is isolated in
+  `db-service/app/planner.py` and `db-service/app/database.py`, so another database needs changes in those two files.
+- The sample runbooks, `graph.json`, and eval questions describe the sample telecom schema. They do not apply to another schema.
+
+## API
+
+No authentication for now, so local testing is easy (Keycloak and JWT are planned).
+
+### agent-service
+
+`POST /ask-quick` and `POST /ask` take the same request and return the same response shape.
+
+```json
+{"question": "Total unpaid invoice amount per customer in 2025"}
+```
+
+- `answer` is always a text.
+- `data` (`columns`, `rows`, `truncated`) is present only when the query returned rows. A client can show it as a table or chart.
+- `code` is present only for an error. It is a short stable value, for example `LLM_BUSY`, `TIMEOUT`, `QUERY_FAILED`,
+  `DATA_CHANGE_NOT_ALLOWED`, `REQUEST_BLOCKED`, `SERVICE_UNAVAILABLE`, `INVALID_REQUEST`, `NOT_IMPLEMENTED`, `INTERNAL_ERROR`.
+  The body has the same shape for every status, also for a crash or an unknown path.
+- `request_id` is in every response. Send your own `X-Request-ID` header (8 to 64 characters of `A-Za-z0-9._-`) or get a generated one.
+
+Result rows never go to the LLM, except one single value (for example a count), which lets the model write a sentence.
+Turn that off with `RESPONSE_LLM_SEES_VALUES=false`. The client never receives the SQL or a stack trace.
+They go to the logs and to Langfuse, with the request ID.
+
+### db-service and knowledge-service
+
+| Service | Endpoints |
+|---|---|
+| db-service | `GET /catalog`, `POST /schema`, `POST /plan`, `POST /query`, `GET /health` |
+| knowledge-service | `GET /index`, `GET /graph`, `GET /runbooks/{name}`, `POST /generate`, `GET /health` |
+
+Details and examples are in [`db-service/README.md`](db-service/README.md) and
+[`knowledge-service/README.md`](knowledge-service/README.md).
+
+## Design decisions
+
+**Three layers keep the database read-only.**
+1. The agent-side guardrail in the Query Analyzer stops requests to change data and prompt injection at step 1, with a fixed refusal text.
+2. In `db-service`, a sqlglot parser accepts exactly one `SELECT` (unions and subqueries are fine) and rejects
+   `INSERT`, `UPDATE`, `DELETE`, `DROP`, `SELECT INTO`, and locking clauses.
+3. The service connects with a role that has only `SELECT`, runs each query in a `READ ONLY` transaction,
+   and enforces a statement timeout and a row limit.
+
+The guardrail is an LLM decision and can be wrong. Layers 2 and 3 are not LLM decisions. `/plan` uses `EXPLAIN`,
+never `EXPLAIN ANALYZE`, so a plan check never runs the query.
+
+**No RAG, no embeddings.** The knowledge base is small, so the agent sends the needed text to the LLM.
+This removes retrieval errors. Runbook text is loaded only when it is relevant, to keep the context small.
+
+**Schema details come live from the database, never from Markdown.** The knowledge base holds only what the
+database cannot say: the table graph (comments and foreign keys, generated), and business rules.
+
+**The table graph is generated.** `POST /generate` builds `graph.json` from the foreign keys, with no LLM.
+The classifier sees one line per table and one line per foreign key.
+
+**Errors are mapped in one place.** An agent raises an error when it fails and writes no user text.
+The pipeline catches every error and gives it to the Response Agent, which maps it to a stable `code` and a fixed message.
+
+**Each agent has its own LLM settings.** Model, temperature, `top_p`, `top_k`, and reasoning on or off are set per
+agent in `.env`. See [Configuration](#configuration).
+
+**Observable by default.** Every request has an ID that flows through all three services and into every JSON log line.
+Optional Langfuse tracing records one trace per request, with one observation per pipeline step.
+
+**Simple code.** Plain functions, sync code, one file per agent, one Markdown prompt per agent, all settings in
+`config.py`. A new reader should understand each file without help.
+
+**Any PostgreSQL works.** The only database setting is `DATABASE_URL`. A hosted provider such as Supabase should work by changing
+that one value. I have not tested a hosted provider yet.
+
+## Measured results
+
+Every agent must reach 90% on its own ground truth before the next agent is built.
+The Table Classifier is scored on the data questions in [`eval/dataset/questions.toml`](eval/dataset/questions.toml).
+Each expected table list includes the tables on the join path, and the tests check it against the real schema.
+PASS is an exact match. WARN means all expected tables plus extra ones, and counts as a success.
+FAIL means a missing table, because a missing table costs a retry later.
+
+| What changed | Table accuracy |
+|---|---|
+| Table descriptions that name the related tables (hand-written hints) | 96.7% |
+| Plain descriptions only, no hints | 80.0% |
+| Plain descriptions + a table-relationship list (one `A -> B` line per foreign key) | 96.7% |
+| Same, with reasoning turned off for speed | 93.3% |
+
+- **A table-link list recovers the accuracy** without hand-written hints. It is now generated from the foreign keys.
+- **Reasoning cost most of the time.** With reasoning off, one call dropped from 4.5 s to 1.3 s, and the whole eval run from
+  about 8 minutes to 1.5 minutes. One question lost a bridge table, so reasoning is a per-agent setting: off for the analyzer, on for the classifier.
+- With about 30 questions, one question is 3.3 points, so small differences between runs are noise.
 
 ## Configuration
 
 Each service reads its settings from its own `.env` file. See the `.env.example` files.
-LLM options can be set for each agent, with one line each. An option that you do not set uses the default:
+LLM options can be set per agent, one line each. An option you do not set uses the default:
 
 ```bash
 LLM_MODEL=Qwen/Qwen3.8-Flash
@@ -175,50 +258,50 @@ TABLE_CLASSIFIER__REASONING_ENABLED=true    # this agent thinks before it answer
 # QUERY_ANALYZER__MODEL=<a smaller, faster model>
 ```
 
-Optional tracing: set `LANGFUSE_ENABLED=true` and the Langfuse keys in `agent-service/.env`.
-Every LLM call then appears as a span with its model, options, and token counts. Tracing is off by default,
-and a tracing failure never breaks a request.
+Time limits (`LLM_TIMEOUT_SECONDS`, `REQUEST_TIMEOUT_SECONDS`, `STATEMENT_TIMEOUT_MS`, ...) are in the same files.
+For tracing, set `LANGFUSE_ENABLED=true` and the Langfuse keys in `agent-service/.env`. It is off by default,
+and a tracing failure never breaks a request. Set `LOG_FORMAT=text` for readable logs in a terminal.
 
 ## Tests and evals
 
 ```bash
-make test         # 189 tests across the four projects (db-service needs the database from step 1)
+make test         # tests of all four projects
 make lint         # ruff
-make eval         # dev eval: classifier, SQL generator, whole system (needs make dbsvc, knowledge, agent)
+make eval         # dev eval: classifier, SQL generator, whole system (needs make up, and real LLM calls)
 ```
 
-The tests need no API key and no running service, except the database for `db-service`.
-The agent tests use a fake LLM and a fake HTTP layer. The eval makes real LLM calls.
-The eval writes a log for each question (what each step returned, what was expected, and why it passed or failed)
-and a CSV to `eval/results/`. See [`eval/README.md`](eval/README.md).
+The tests need no API key and no running service. The agent tests use a fake LLM and a fake HTTP layer.
+About 28 `db-service` tests need the sample database from the quickstart, and are skipped without it.
+The eval makes real LLM calls. It writes a log for each question and a CSV to `eval/results/`.
+See [`eval/README.md`](eval/README.md).
 
 ## Project structure
 
 ```
 database/init/         sample database: schema, seed data, read-only role
-db-service/            SQL guard, schema reader, planner, executor     (see its README for the API)
-knowledge-service/     knowledge_base/: index, tables, relationships, runbooks    (see its README)
+db-service/            SQL guard, schema reader, planner, executor
+knowledge-service/     knowledge_base/: index, generated table graph, runbooks
 agent-service/         agents, prompts, LLM client, knowledge client, tracing
 eval/                  ground truth and runners that score each agent
-Makefile               db-load, dbsvc, knowledge, agent, eval, test, lint
+scripts/               start-all.sh and stop-all.sh (used by make up / make down)
+Makefile               db-load, up, down, dbsvc, knowledge, agent, eval, test, lint
 ```
 
 ## Roadmap
 
 | Step | Status |
 |---|---|
-| db-service: `/schema` with foreign key expansion, `/plan`, `/query`, SQL guard | Done |
-| knowledge-service: index, tables, relationships, runbooks | Done |
-| Agent 1: Query Analyzer | Done |
-| Agent 2: Table Classifier, with an eval at 90% or more | Done |
+| db-service: catalog, schema with foreign key expansion, plan, query, SQL guard | Done |
+| knowledge-service: index, runbooks, generated table graph | Done |
+| Query Analyzer with guardrail, Table Classifier, SQL Generator | Done |
+| Response Agent, error contract, request IDs, structured logs, Langfuse traces | Done |
+| `POST /ask-quick` end to end | Done |
 | Eval harness with ground truth and per-question logs | Done |
-| Runbook text for the Table Classifier (the usage-to-subscriptions link has no foreign key) | Next |
-| Table graph (`graph.json`, networkx) generated from the live database; replaces `tables.md` and `table_relationship.md` | Done |
+| Table feedback agent (Loop A) | Planned |
+| SQL validator with a plan check and an LLM judge (Loop B) | Planned |
+| `POST /ask` end to end | Planned |
 | Shortest-path join discovery in code, so the LLM only picks the main tables | Planned |
-| Agent 3: Table feedback loop (steps 3 and 4) | Planned |
-| Agent 4: SQL Generator, and Agent 5: SQL Validator with a plan check and a judge | Planned |
-| `POST /ask` end to end, with the execution and response steps | Planned |
-| Knowledge version check for an instant cache refresh | Planned |
+| Authentication (Keycloak, JWT) | Planned |
 | Hosted PostgreSQL test (Supabase), CI | Planned |
 
 ## License

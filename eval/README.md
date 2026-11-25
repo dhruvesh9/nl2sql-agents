@@ -14,7 +14,14 @@ Each level then measures only its own agent. Level 3 shows what the errors add u
 
 ## Run
 
-Start `make dbsvc`, `make knowledge`, and `make agent`. Then, from the project root:
+Run `make up` (PostgreSQL, db-service, knowledge-service, agent-service; `make down` stops them).
+Or start `make dbsvc`, `make knowledge`, and `make agent` yourself. Then, from the project root:
+```bash
+make eval-classifier   # level 1 only, all 32 questions
+make eval-sql          # level 2 only
+make eval-system       # level 3 only (POST /ask-quick)
+```
+More options:
 ```bash
 make eval                                    # all levels, dev split, 1 attempt
 make eval ARGS="--level sql"                 # one level: classifier, sql, or system
