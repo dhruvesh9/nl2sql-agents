@@ -3,6 +3,11 @@
 Ask a question about your data in plain English. A small team of LLM agents finds the right tables,
 writes a SQL `SELECT`, and a guarded read-only service runs it. You get back an answer and the rows.
 
+> [!TIP]
+> **[Open the interactive architecture explorer](https://dhruvesh9.github.io/nl2sql-agents/explorer/)**:
+> pick a scenario and watch the question flow through the agents and services, with the safety layers and the error contract.
+> No setup is needed. It uses example data and does not call a real model or database.
+
 Built as three small FastAPI services plus an eval project that measures every agent against ground truth.
 
 **Stack:** Python 3.12+, FastAPI, PostgreSQL, SQLAlchemy, sqlglot, networkx, Together AI, Langfuse (optional), pytest.
@@ -283,6 +288,7 @@ db-service/            SQL guard, schema reader, planner, executor
 knowledge-service/     knowledge_base/: index, generated table graph, runbooks
 agent-service/         agents, prompts, LLM client, knowledge client, tracing
 eval/                  ground truth and runners that score each agent
+explorer/              interactive architecture page (GitHub Pages)
 scripts/               start-all.sh and stop-all.sh (used by make up / make down)
 Makefile               db-load, up, down, dbsvc, knowledge, agent, eval, test, lint
 ```
